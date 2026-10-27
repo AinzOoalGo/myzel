@@ -31,14 +31,16 @@ export function clearSave(): void {
 export interface Prefs {
   vibration: boolean;
   reducedMotion: boolean;
+  /** nur Testmodus */
+  speed: number;
 }
 
 export function loadPrefs(): Prefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs>;
-    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion() };
+    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion(), speed: typeof p.speed === 'number' ? p.speed : 1 };
   } catch {
-    return { vibration: true, reducedMotion: systemReducedMotion() };
+    return { vibration: true, reducedMotion: systemReducedMotion(), speed: 1 };
   }
 }
 

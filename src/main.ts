@@ -44,6 +44,8 @@ const fmt = formatNumber;
 
 let storageOk = true;
 const prefs = loadPrefs();
+/** Testmodus: Spieltempo (nur wenn CONFIG.testTools an ist) */
+const speed = (): number => (CONFIG.testTools && CONFIG.testSpeeds.includes(prefs.speed) ? prefs.speed : 1);
 
 /** Lädt den Spielstand (inkl. Offline-Ertrag) oder startet ein neues Spiel. */
 function boot(): { state: GameState; welcome: { seconds: number; gained: number } | null } {
@@ -219,6 +221,9 @@ function updateUi(force = false): void {
     state.zone >= 2
       ? t('net_progress_z2', { c: connectedCount(state), goal: CONFIG.zone2.goal })
       : t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
+  const sp = speed();
+  $('#speed-badge').hidden = sp === 1;
+  $('#speed-badge').textContent = t('test_badge', { v: sp });
   const se = season(state);
   $('#season').hidden = !se;
   if (se) $('#season').textContent = `${t(`season_${se}` as TextKey)} · ${formatDuration(Math.ceil(seasonLeft(state)))}`;
@@ -575,6 +580,22 @@ function showSettings(): void {
     rm.append(rmCb, document.createTextNode(` ${t('reduced_motion')}`));
     box.append(rm);
 
+    if (CONFIG.testTools) {
+      box.append(el('h3', t('test_title')), el('p', t('test_hint'), 'small'));
+      const row = el('div', '', 'speed-row');
+      for (const v of CONFIG.testSpeeds) {
+        const b = el('button', `×${v}`, v === speed() ? 'on' : '');
+        b.addEventListener('click', () => {
+          prefs.speed = v;
+          savePrefs(prefs);
+          row.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+          updateUi();
+        });
+        row.append(b);
+      }
+      box.append(row);
+    }
+
     if (!storageOk) box.append(el('p', t('storage_warning'), 'warn'));
 
     box.append(el('h3', t('export')), el('p', t('export_hint'), 'small'));
@@ -654,7 +675,8 @@ function frame(now: number): void {
     if (off.seconds > 60 && off.gained > 0) showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(off.seconds), v: fmt(off.gained) }));
     elapsed = 0;
   }
-  acc += elapsed;
+  // im Testmodus läuft die Spielzeit schneller (Produktion, Wachstum, Ereignisse, Jahreszeiten, Rivalen)
+  acc += elapsed * speed();
   const edgesBefore = state.edges.length;
   while (acc >= DT) {
     tick(state, DT);

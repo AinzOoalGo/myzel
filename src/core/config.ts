@@ -174,6 +174,13 @@ export const CONFIG = {
   /** +2 % Nährstoffe je freigeschaltetem Erfolg */
   achievementBonus: 0.02,
 
+  /**
+   * NUR ZUM TESTEN: Tempo-Regler (×1/×2/×5/×10) in den Einstellungen.
+   * Vor dem Release auf false setzen – dann ist er komplett verschwunden.
+   */
+  testTools: true,
+  testSpeeds: [1, 2, 5, 10] as number[],
+
   offlineCapSeconds: 12 * 3600,
   autosaveSeconds: 30,
 } as const;
