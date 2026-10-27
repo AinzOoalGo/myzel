@@ -1,7 +1,7 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Prototyp v0.2',
+  version: 'Prototyp v0.3',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
@@ -50,7 +50,7 @@ export const de = {
 
   hint_start: 'Tippe auf den Boden, um Nährstoffe zu sammeln.',
   hint_select: 'Jetzt tippe auf einen gestrichelten Knoten in der Nähe.',
-  hint_growing: 'Der Faden wächst. Tippen beschleunigt ihn.',
+  hint_growing: 'Der Faden wächst (noch {t}). Tippen beschleunigt ihn.',
   hint_water: 'Dein Baum braucht Wasser: Verbinde eine Feuchtstelle (blau).',
 
   float_n: '+{v}',
@@ -65,9 +65,11 @@ export const de = {
   settings: 'Einstellungen',
   help: 'So geht’s',
   help_body:
-    'Tippe auf den Boden für Nährstoffe. Tippe einen gestrichelten Knoten an und lass einen Faden dorthin wachsen. Verbundene Knoten arbeiten automatisch für dich – auch wenn das Spiel geschlossen ist (bis 12 Stunden).',
+    'Tippe auf den Boden für Nährstoffe. Tippe einen gestrichelten Knoten an und lass einen Faden dorthin wachsen. Verbundene Knoten arbeiten automatisch für dich – auch wenn das Spiel geschlossen ist (bis 12 Stunden). Mit zwei Fingern oder dem Mausrad zoomen, mit einem Finger ziehen zum Verschieben.',
   legend: 'Legende',
   vibration: 'Vibration beim Tippen',
+  reduced_motion: 'Weniger Bewegung und Partikel',
+  center: 'Zentrieren',
   export: 'Spielstand exportieren',
   export_hint: 'Diesen Text sicher aufbewahren, um den Spielstand später wiederherzustellen.',
   copy: 'Kopieren',

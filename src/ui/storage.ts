@@ -30,14 +30,15 @@ export function clearSave(): void {
 
 export interface Prefs {
   vibration: boolean;
+  reducedMotion: boolean;
 }
 
 export function loadPrefs(): Prefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs>;
-    return { vibration: p.vibration ?? true };
+    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion() };
   } catch {
-    return { vibration: true };
+    return { vibration: true, reducedMotion: systemReducedMotion() };
   }
 }
 
@@ -46,5 +47,13 @@ export function savePrefs(p: Prefs): void {
     localStorage.setItem(PREFS, JSON.stringify(p));
   } catch {
     /* nichts zu tun */
+  }
+}
+
+function systemReducedMotion(): boolean {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
   }
 }

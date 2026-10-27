@@ -177,7 +177,7 @@ function renderCard(): void {
 
 function hint(): string {
   const c = connectedCount(state);
-  if (state.growth) return t('hint_growing');
+  if (state.growth) return t('hint_growing', { t: formatDuration(Math.ceil(Renderer.growthEta(state) ?? 0)) });
   if (c === 0) return state.res.n < 20 ? t('hint_start') : t('hint_select');
   const rates = computeRates(state);
   if (sugarUnlocked(state) && rates.treeSupply < 1 && state.res.water < 1) return t('hint_water');
@@ -206,6 +206,7 @@ function updateUi(force = false): void {
   }
   lockedEl.hidden = sugarOn;
   lockedEl.textContent = t('locked_sugar');
+  $('#btn-center').hidden = !renderer.userMoved || !cardEl.hidden;
   const h = hint();
   hintEl.textContent = h;
   hintEl.hidden = !h;
@@ -214,6 +215,7 @@ function updateUi(force = false): void {
 
   if (state.stats.zoneDoneAt !== null && !zoneShown) {
     zoneShown = true;
+    renderer.startCelebration();
     showMessage(t('zone_title'), t('zone_body', { c: connectedCount(state), t: formatDuration(state.stats.zoneDoneAt) }));
   }
 }
@@ -231,23 +233,76 @@ function haptic(ms: number): void {
   }
 }
 
+/** Tippen sofort beim Berühren (wichtig fürs Spielgefühl); Ziehen verschiebt, zwei Finger zoomen. */
+const pointers = new Map<number, { x: number; y: number }>();
+let pinchDist = 0;
+let dragMoved = 0;
+const local = (e: PointerEvent | WheelEvent): [number, number] => {
+  const rect = canvas.getBoundingClientRect();
+  return [e.clientX - rect.left, e.clientY - rect.top];
+};
+
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  const sx = e.clientX - rect.left;
-  const sy = e.clientY - rect.top;
+  try {
+    canvas.setPointerCapture(e.pointerId);
+  } catch {
+    /* nicht unterstützt */
+  }
+  const [sx, sy] = local(e);
+  pointers.set(e.pointerId, { x: sx, y: sy });
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    pinchDist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+    return;
+  }
+  if (pointers.size > 2) return;
+  dragMoved = 0;
   const hit = renderer.hitTest(state, sx, sy);
   if (hit && !hit.connected) {
     renderer.selected = hit.id;
     haptic(8);
   } else {
     const v = tap(state);
-    renderer.addFloat(sx, sy, t('float_n', { v: fmt(v) }));
+    renderer.tapFeedback(sx, sy, t('float_n', { v: fmt(v) }));
     haptic(6);
     if (hit) renderer.selected = hit.type === 'spore' ? null : hit.id;
   }
   updateUi();
 });
+
+canvas.addEventListener('pointermove', (e) => {
+  const prev = pointers.get(e.pointerId);
+  if (!prev) return;
+  const [sx, sy] = local(e);
+  pointers.set(e.pointerId, { x: sx, y: sy });
+  if (pointers.size === 1) {
+    dragMoved += Math.hypot(sx - prev.x, sy - prev.y);
+    if (dragMoved > 12) renderer.panBy(sx - prev.x, sy - prev.y);
+  } else if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+    if (pinchDist > 0) renderer.zoomAt(d / pinchDist, (a!.x + b!.x) / 2, (a!.y + b!.y) / 2);
+    pinchDist = d;
+  }
+});
+
+const release = (e: PointerEvent) => {
+  pointers.delete(e.pointerId);
+  pinchDist = 0;
+};
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault();
+    const [sx, sy] = local(e);
+    renderer.zoomAt(Math.exp(-e.deltaY * 0.0015), sx, sy);
+  },
+  { passive: false },
+);
+$('#btn-center').addEventListener('click', () => renderer.resetView());
 
 // ---------- Dialoge ----------
 
@@ -303,6 +358,17 @@ function showSettings(): void {
     });
     vib.append(cb, document.createTextNode(` ${t('vibration')}`));
     box.append(vib);
+    const rm = el('label', '', 'toggle');
+    const rmCb = el('input');
+    rmCb.type = 'checkbox';
+    rmCb.checked = prefs.reducedMotion;
+    rmCb.addEventListener('change', () => {
+      prefs.reducedMotion = rmCb.checked;
+      renderer.reducedMotion = rmCb.checked;
+      savePrefs(prefs);
+    });
+    rm.append(rmCb, document.createTextNode(` ${t('reduced_motion')}`));
+    box.append(rm);
 
     if (!storageOk) box.append(el('p', t('storage_warning'), 'warn'));
 
@@ -331,6 +397,7 @@ function showSettings(): void {
         const r = importString(inp.value);
         state = r.state;
         renderer.selected = null;
+        renderer.reset();
         zoneShown = state.stats.zoneDoneAt !== null;
         save();
         closeModal();
@@ -352,6 +419,7 @@ function showSettings(): void {
       clearSave();
       state = newGame();
       renderer.selected = null;
+      renderer.reset();
       zoneShown = false;
       save();
       closeModal();
@@ -382,9 +450,14 @@ function frame(now: number): void {
     elapsed = 0;
   }
   acc += elapsed;
+  const edgesBefore = state.edges.length;
   while (acc >= DT) {
     tick(state, DT);
     acc -= DT;
+  }
+  if (state.edges.length > edgesBefore) {
+    renderer.connectedBurst(state, state.edges[state.edges.length - 1]!.to);
+    haptic(25);
   }
   renderer.draw(state, elapsed, now / 1000);
   uiAcc += elapsed;
@@ -409,9 +482,11 @@ new ResizeObserver(() => renderer.resize()).observe(canvas);
 
 $('#title').textContent = t('title');
 $('#res-n .l').textContent = t('res_n');
+$('#btn-center').textContent = `⌖ ${t('center')}`;
 $('#res-sugar .l').textContent = t('res_sugar');
 $('#res-water .l').textContent = t('res_water');
 buildUpgrades();
+renderer.reducedMotion = prefs.reducedMotion;
 renderer.resize();
 zoneShown = state.stats.zoneDoneAt !== null;
 updateUi(true);
