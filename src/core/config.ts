@@ -6,6 +6,16 @@
 
 export type NodeType = 'spore' | 'laub' | 'totholz' | 'feucht' | 'baum' | 'stein';
 export type UpgradeId = 'hyphen' | 'enzym' | 'frucht' | 'rhizo';
+export type GenomeId = 'z1' | 'z2' | 'z3' | 'z4' | 's1' | 's2' | 's3' | 's4' | 'p1' | 'p2' | 'p3' | 'p4';
+export type Branch = 'zersetzer' | 'symbiont' | 'pionier';
+export type EventType = 'regen' | 'duerre' | 'gold';
+
+export interface GenomeDef {
+  id: GenomeId;
+  branch: Branch;
+  tier: number; // 1..4, jede Stufe braucht die vorige im selben Ast
+  cost: number; // Sporen
+}
 
 export interface UpgradeDef {
   id: UpgradeId;
@@ -71,6 +81,59 @@ export const CONFIG = {
 
   /** Ziel des Prototyps (Zone 1). */
   zoneGoal: 25,
+
+  /** Sporenflug (Prestige) */
+  prestige: {
+    minNodes: 15,
+    /** Sporen = floor(sqrt(Nährstoffe dieses Durchlaufs / divisor)) */
+    divisor: 2000,
+    /** +2 % auf alle Nährstoffe je jemals gewonnener Spore */
+    sporeBonus: 0.02,
+  },
+
+  genome: [
+    { id: 'z1', branch: 'zersetzer', tier: 1, cost: 1 },
+    { id: 'z2', branch: 'zersetzer', tier: 2, cost: 3 },
+    { id: 'z3', branch: 'zersetzer', tier: 3, cost: 6 },
+    { id: 'z4', branch: 'zersetzer', tier: 4, cost: 12 },
+    { id: 's1', branch: 'symbiont', tier: 1, cost: 1 },
+    { id: 's2', branch: 'symbiont', tier: 2, cost: 3 },
+    { id: 's3', branch: 'symbiont', tier: 3, cost: 6 },
+    { id: 's4', branch: 'symbiont', tier: 4, cost: 12 },
+    { id: 'p1', branch: 'pionier', tier: 1, cost: 1 },
+    { id: 'p2', branch: 'pionier', tier: 2, cost: 3 },
+    { id: 'p3', branch: 'pionier', tier: 3, cost: 6 },
+    { id: 'p4', branch: 'pionier', tier: 4, cost: 12 },
+  ] as GenomeDef[],
+
+  genomeEffects: {
+    z1Decomp: 1.5, // Laub und Totholz ×1,5
+    z2Stock: 1.5, // Totholz liefert ×1,5 aus seinem Vorrat
+    z3Tap: 2, // Tipps ×2
+    z4Laub: 2, // Laub ×2
+    s1Sugar: 1.5, // Zucker ×1,5
+    s2Water: 1.5, // Wasser ×1,5, Speicher ×3
+    s2Cap: 3,
+    s3Offline: 24 * 3600, // Offline-Grenze 24 Std.
+    s4PerTree: 0.05, // +5 % Nährstoffe je verbundenem Baum
+    p1Cost: 0.8, // Fäden ×0,8 Kosten
+    p2Reach: 40, // +40 Reichweite
+    p3Speed: 2, // Fäden ×2 Tempo
+    p4Start: 1000, // Startvorrat pro Durchlauf
+  },
+
+  events: {
+    firstAt: 150, // Sekunden Spielzeit bis zum ersten Ereignis
+    minGap: 180,
+    maxGap: 420,
+    weights: { regen: 45, duerre: 25, gold: 30 } as Record<EventType, number>,
+    regen: { duration: 60, growth: 2, water: 3 },
+    duerre: { duration: 90, water: 0.3, offlineWater: 0.65 },
+    gold: { duration: 12, rewardSeconds: 60, minReward: 50 },
+  },
+
+  /** +2 % Nährstoffe je freigeschaltetem Erfolg */
+  achievementBonus: 0.02,
 
   offlineCapSeconds: 12 * 3600,
   autosaveSeconds: 30,

@@ -1,5 +1,15 @@
-import { CONFIG, type UpgradeId } from './core/config';
+import { CONFIG, type Branch, type GenomeId, type UpgradeId } from './core/config';
+import { ACHIEVEMENTS, checkAchievements } from './core/achievements';
 import {
+  buyGenome,
+  canPrestige,
+  catchGolden,
+  genomeAvailable,
+  has,
+  mods,
+  nodeYield,
+  prestige,
+  sporeGain,
   canBuy,
   buy,
   computeRates,
@@ -11,7 +21,6 @@ import {
   sugarUnlocked,
   tap,
   tick,
-  totholzRate,
   upgradeCost,
   type GameState,
 } from './core/game';
@@ -72,7 +81,6 @@ const UPGRADE_IDS: UpgradeId[] = ['hyphen', 'enzym', 'frucht', 'rhizo'];
 const upgradeRows = new Map<UpgradeId, { row: HTMLElement; level: HTMLElement; btn: HTMLButtonElement }>();
 
 function buildUpgrades(): void {
-  $('#sheet-title').textContent = t('upgrades');
   for (const id of UPGRADE_IDS) {
     const row = document.createElement('div');
     row.className = 'up';
@@ -98,16 +106,17 @@ function costLabel(c: { n: number; sugar: number }): string {
 function nodeDetails(id: number): string {
   const n = state.nodes[id]!;
   const b = distanceBonus(n);
+  const m = mods(state);
   switch (n.type) {
     case 'laub':
-      return t('yield_n', { v: fmt(CONFIG.nodes.laub.nps * b * (1 + CONFIG.effects.enzymDecomp * state.levels.enzym)) });
+      return t('yield_n', { v: fmt(nodeYield(state, n, m)) });
     case 'totholz':
       if (n.connected && n.stock <= 0) return t('depleted');
-      return `${t('yield_n', { v: fmt(totholzRate(state, n)) })} · ${t('stock', { v: fmt(n.stock) })}`;
+      return `${t('yield_n', { v: fmt(nodeYield(state, { ...n, stock: Math.max(n.stock, 1) }, m)) })} · ${t('stock', { v: fmt(n.stock * m.stock * m.global) })}`;
     case 'feucht':
-      return t('yield_water', { v: fmt(CONFIG.nodes.feucht.water * b) });
+      return t('yield_water', { v: fmt(CONFIG.nodes.feucht.water * b * m.water) });
     case 'baum':
-      return t('yield_sugar', { v: fmt(CONFIG.nodes.baum.sugar * b), w: fmt(CONFIG.nodes.baum.waterUse) });
+      return t('yield_sugar', { v: fmt(CONFIG.nodes.baum.sugar * b * m.sugar), w: fmt(CONFIG.nodes.baum.waterUse) });
     default:
       return '';
   }
@@ -176,6 +185,10 @@ function renderCard(): void {
 }
 
 function hint(): string {
+  const now = state.stats.playSeconds;
+  if (state.events.golden) return t('ev_gold', { t: formatDuration(Math.ceil(state.events.golden.until - now)) });
+  const ev = state.events.active;
+  if (ev && ev.until > now) return t(ev.type === 'regen' ? 'ev_regen' : 'ev_duerre', { t: formatDuration(Math.ceil(ev.until - now)) });
   const c = connectedCount(state);
   if (state.growth) return t('hint_growing', { t: formatDuration(Math.ceil(Renderer.growthEta(state) ?? 0)) });
   if (c === 0) return state.res.n < 20 ? t('hint_start') : t('hint_select');
@@ -195,6 +208,14 @@ function updateUi(force = false): void {
   $('#res-water').hidden = !waterOn;
   $('#res-water .v').textContent = fmt(state.res.water);
   $('#net').textContent = t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
+  $('#res-spores').hidden = state.meta.sporesTotal === 0;
+  $('#res-spores .v').textContent = fmt(state.meta.spores);
+  updateTabs();
+  if (activeTab === 'genome') updatePrestigeBox();
+  for (const id of checkAchievements(state)) {
+    toast(t('ach_toast', { name: t(`ach_${id}` as TextKey) }));
+    if (activeTab === 'ach') buildAchievements();
+  }
 
   for (const id of UPGRADE_IDS) {
     const r = upgradeRows.get(id)!;
@@ -220,6 +241,153 @@ function updateUi(force = false): void {
   }
 }
 let zoneShown = false;
+
+// ---------- Tabs: Wachstum · Genom · Erfolge ----------
+
+type Tab = 'grow' | 'genome' | 'ach';
+let activeTab: Tab = 'grow';
+const TABS: Tab[] = ['grow', 'genome', 'ach'];
+
+function setTab(tab: Tab): void {
+  activeTab = tab;
+  for (const tb of TABS) {
+    $(`#tab-${tb}`).hidden = tb !== tab;
+    $(`#tabs [data-tab="${tb}"]`).classList.toggle('on', tb === tab);
+  }
+  if (tab === 'genome') buildGenome();
+  if (tab === 'ach') buildAchievements();
+  $('#sheet').scrollTop = 0;
+}
+
+function genomeAffordable(): boolean {
+  return CONFIG.genome.some((g) => genomeAvailable(state, g.id) && state.meta.spores >= g.cost);
+}
+
+function updateTabs(): void {
+  $('#tabs [data-tab="genome"] .badge').hidden = !(canPrestige(state) || genomeAffordable());
+  $('#tabs [data-tab="ach"] .count').textContent = `${state.meta.achievements.length}/${ACHIEVEMENTS.length}`;
+}
+
+function sporeBonusPct(): string {
+  return fmt(CONFIG.prestige.sporeBonus * state.meta.sporesTotal * 100);
+}
+
+function updatePrestigeBox(): void {
+  const btn = document.querySelector<HTMLButtonElement>('#prestige-btn');
+  const need = document.querySelector<HTMLElement>('#prestige-need');
+  if (!btn || !need) return;
+  const ok = canPrestige(state);
+  btn.disabled = !ok;
+  btn.textContent = t('prestige_btn', { v: fmt(sporeGain(state)) });
+  const c = connectedCount(state);
+  need.textContent = c < CONFIG.prestige.minNodes ? t('prestige_need', { n: CONFIG.prestige.minNodes, c }) : t('prestige_more');
+}
+
+function buildGenome(): void {
+  const box = $('#tab-genome');
+  box.innerHTML = '';
+  const pr = el('div', '', 'prestige');
+  pr.append(el('strong', t('prestige_title')), el('p', t('prestige_desc'), 'small'));
+  const btn = el('button', '', 'buy wide');
+  btn.id = 'prestige-btn';
+  btn.addEventListener('click', confirmPrestige);
+  const need = el('p', '', 'small');
+  need.id = 'prestige-need';
+  pr.append(btn, need);
+  box.append(pr, el('p', t('spores_have', { v: fmt(state.meta.spores), b: sporeBonusPct() }), 'spores-line'));
+  for (const branch of ['zersetzer', 'symbiont', 'pionier'] as Branch[]) {
+    box.append(el('h3', t(`branch_${branch}` as TextKey), 'branch'));
+    for (const g of CONFIG.genome.filter((x) => x.branch === branch)) {
+      const row = el('div', '', 'up');
+      const text = el('div', '', 'up-text');
+      text.append(el('div', t(`g_${g.id}` as TextKey), 'up-name'), el('div', t(`g_${g.id}_desc` as TextKey), 'up-desc'));
+      const owned = has(state, g.id);
+      const b = el('button', owned ? t('genome_owned') : `${g.cost} Sp.`, 'buy');
+      b.disabled = owned || !genomeAvailable(state, g.id) || state.meta.spores < g.cost;
+      if (owned) b.classList.add('owned');
+      if (!owned && !genomeAvailable(state, g.id)) b.title = t('genome_locked');
+      b.addEventListener('click', () => {
+        if (buyGenome(state, g.id as GenomeId)) {
+          haptic(20);
+          save();
+          buildGenome();
+          updateUi(true);
+        }
+      });
+      row.append(text, b);
+      box.append(row);
+    }
+  }
+  updatePrestigeBox();
+}
+
+function buildAchievements(): void {
+  const box = $('#tab-ach');
+  box.innerHTML = '';
+  const n = state.meta.achievements.length;
+  box.append(el('p', t('ach_header', { c: n, t: ACHIEVEMENTS.length, b: fmt(n * CONFIG.achievementBonus * 100) }), 'spores-line'));
+  for (const a of ACHIEVEMENTS) {
+    const done = state.meta.achievements.includes(a.id);
+    const row = el('div', '', `ach${done ? ' done' : ''}`);
+    row.append(el('span', done ? '✓' : '·', 'ach-mark'));
+    const text = el('div', '', 'up-text');
+    text.append(el('div', t(`ach_${a.id}` as TextKey), 'up-name'), el('div', t(`ach_${a.id}_desc` as TextKey), 'up-desc'));
+    row.append(text);
+    box.append(row);
+  }
+}
+
+function confirmPrestige(): void {
+  if (!canPrestige(state)) return;
+  const gain = sporeGain(state);
+  openModal((box) => {
+    box.append(el('h2', t('prestige_confirm_title')), el('p', t('prestige_confirm_body', { v: fmt(gain) })));
+    const go = el('button', t('prestige_confirm'), 'primary');
+    go.addEventListener('click', () => {
+      const next = prestige(state);
+      if (!next) return closeModal();
+      state = next;
+      renderer.selected = null;
+      renderer.reset();
+      zoneShown = false;
+      checkAchievements(state);
+      save();
+      setTab('genome');
+      updateUi(true);
+      showMessage(t('prestige_done_title'), t('prestige_done_body'));
+    });
+    const no = el('button', t('cancel'));
+    no.addEventListener('click', closeModal);
+    box.append(go, no);
+  });
+}
+
+// ---------- Hinweise ----------
+
+const toastEl = $('#toast');
+const toastQueue: string[] = [];
+let toastBusy = false;
+function toast(text: string): void {
+  toastQueue.push(text);
+  if (!toastBusy) nextToast();
+}
+function nextToast(): void {
+  const text = toastQueue.shift();
+  if (!text) {
+    toastBusy = false;
+    return;
+  }
+  toastBusy = true;
+  toastEl.textContent = text;
+  toastEl.hidden = false;
+  toastEl.classList.remove('show');
+  void toastEl.offsetWidth;
+  toastEl.classList.add('show');
+  setTimeout(() => {
+    toastEl.hidden = true;
+    nextToast();
+  }, 2600);
+}
 
 // ---------- Eingabe ----------
 
@@ -259,7 +427,12 @@ canvas.addEventListener('pointerdown', (e) => {
   if (pointers.size > 2) return;
   dragMoved = 0;
   const hit = renderer.hitTest(state, sx, sy);
-  if (hit && !hit.connected) {
+  if (state.events.golden && renderer.hitGolden(state, sx, sy)) {
+    const v = catchGolden(state);
+    renderer.tapFeedback(sx, sy, t('gold_float', { v: fmt(v) }));
+    renderer.connectedBurstAt(sx, sy);
+    haptic(40);
+  } else if (hit && !hit.connected) {
     renderer.selected = hit.id;
     haptic(8);
   } else {
@@ -485,7 +658,15 @@ $('#res-n .l').textContent = t('res_n');
 $('#btn-center').textContent = `⌖ ${t('center')}`;
 $('#res-sugar .l').textContent = t('res_sugar');
 $('#res-water .l').textContent = t('res_water');
+$('#res-spores .l').textContent = t('res_spores');
+for (const tb of TABS) {
+  const b = $(`#tabs [data-tab="${tb}"]`);
+  b.querySelector('.label')!.textContent = t(`tab_${tb}` as TextKey);
+  b.addEventListener('click', () => setTab(tb));
+}
 buildUpgrades();
+setTab('grow');
+checkAchievements(state);
 renderer.reducedMotion = prefs.reducedMotion;
 renderer.resize();
 zoneShown = state.stats.zoneDoneAt !== null;

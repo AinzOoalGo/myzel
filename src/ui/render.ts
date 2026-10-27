@@ -118,6 +118,7 @@ export class Renderer {
   private glowWarm = makeSprite('rgba(255,236,200,1)', 'rgba(255,170,90,0.35)');
   private glowGreen = makeSprite('rgba(200,255,200,0.9)', 'rgba(80,190,110,0.25)');
   private glowBlue = makeSprite('rgba(210,235,255,0.9)', 'rgba(80,150,230,0.25)');
+  private glowGold = makeSprite('rgba(255,245,200,1)', 'rgba(255,190,40,0.45)');
   private soil: CanvasPattern | null;
   selected: number | null = null;
 
@@ -310,6 +311,24 @@ export class Renderer {
     }
   }
 
+  connectedBurstAt(sx: number, sy: number): void {
+    this.energy = 1;
+    if (this.reducedMotion) return;
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      const v = 60 + Math.random() * 90;
+      this.sparks.push({ x: sx, y: sy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, age: 0, life: 0.8, size: 1.8 + Math.random() });
+    }
+  }
+
+  /** Großzügige Trefferfläche, damit man ihn auch auf dem Handy erwischt. */
+  hitGolden(s: GameState, sx: number, sy: number): boolean {
+    const g = s.events.golden;
+    if (!g) return false;
+    const [x, y] = this.toScreen(g.x, g.y);
+    return Math.hypot(x - sx, y - sy) < Math.max(28, 16 * this.cam.scale);
+  }
+
   startCelebration(): void {
     this.celebrate = 4;
     this.energy = 1;
@@ -407,8 +426,60 @@ export class Renderer {
       }
     }
 
+    // goldener Fruchtkörper
+    const g = s.events.golden;
+    if (g) {
+      const life = Math.max(0, g.until - s.stats.playSeconds);
+      const blink = life < 3 ? 0.55 + 0.45 * Math.abs(Math.sin(time * 10)) : 1;
+      const r = 20 / sc;
+      const bob = Math.sin(time * 3) * r * 0.08;
+      ctx.globalCompositeOperation = 'lighter';
+      this.sprite(this.glowGold, g.x, g.y, r * 6 * (1 + Math.sin(time * 4) * 0.1), 0.9 * blink);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = blink;
+      ctx.fillStyle = '#f3e3b0';
+      ctx.beginPath();
+      ctx.roundRect(g.x - r * 0.22, g.y - r * 0.1 + bob, r * 0.44, r * 0.75, r * 0.15);
+      ctx.fill();
+      ctx.fillStyle = '#ffc94a';
+      ctx.beginPath();
+      ctx.ellipse(g.x, g.y - r * 0.15 + bob, r * 0.75, r * 0.45, 0, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,250,220,0.9)';
+      for (const [dx, dy] of [[-0.35, -0.35], [0.1, -0.48], [0.4, -0.3]] as const) {
+        ctx.beginPath();
+        ctx.arc(g.x + dx * r, g.y + dy * r + bob, r * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // ---- Bildschirmebene ----
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // Wetter
+    const ev = s.events.active;
+    const raining = ev?.type === 'regen' && ev.until > s.stats.playSeconds;
+    const drought = ev?.type === 'duerre' && ev.until > s.stats.playSeconds;
+    if (raining) {
+      ctx.fillStyle = 'rgba(60,110,170,0.10)';
+      ctx.fillRect(0, 0, this.w, this.h);
+      if (!this.reducedMotion) {
+        ctx.strokeStyle = 'rgba(170,205,255,0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i < 70; i++) {
+          const x = ((i * 97.3 + time * 40) % (this.w + 40)) - 20;
+          const y = ((i * 53.7 + time * 520) % (this.h + 40)) - 20;
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - 3, y + 12);
+        }
+        ctx.stroke();
+      }
+    } else if (drought) {
+      ctx.fillStyle = 'rgba(190,120,40,0.10)';
+      ctx.fillRect(0, 0, this.w, this.h);
+    }
     // Vignette
     const vg = ctx.createRadialGradient(this.w / 2, this.h / 2, Math.min(this.w, this.h) * 0.3, this.w / 2, this.h / 2, Math.max(this.w, this.h) * 0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)');

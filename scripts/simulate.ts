@@ -6,8 +6,14 @@
  *   bun scripts/simulate.ts
  */
 import { CONFIG, type UpgradeId } from '../src/core/config';
+import { checkAchievements } from '../src/core/achievements';
 import {
   buy,
+  buyGenome,
+  catchGolden,
+  genomeAvailable,
+  prestige,
+  sporeGain,
   canBuy,
   computeRates,
   connectedCount,
@@ -117,8 +123,8 @@ interface RunResult {
   levels: GameState['levels'];
 }
 
-function run(profile: Profile, seed: number): RunResult {
-  const s = newGame(seed);
+function run(profile: Profile, seed: number, start?: GameState): RunResult & { state: GameState; seconds: number } {
+  const s = start ?? newGame(seed);
   const dt = 1 / CONFIG.ticksPerSecond;
   const milestones: Record<number, number | null> = Object.fromEntries(MILESTONES.map((m) => [m, null]));
   let t = 0;
@@ -127,6 +133,7 @@ function run(profile: Profile, seed: number): RunResult {
   let lastAction = 0;
   let longestGap = 0;
   while (t < MAX_SECONDS && connectedCount(s) < CONFIG.zoneGoal) {
+    if (s.events.golden && profile.checkEvery(t) <= 1) catchGolden(s);
     tapAcc += profile.tapsPerSecond(t) * dt;
     while (tapAcc >= 1) {
       tap(s);
@@ -137,6 +144,7 @@ function run(profile: Profile, seed: number): RunResult {
         longestGap = Math.max(longestGap, t - lastAction);
         lastAction = t;
       }
+      checkAchievements(s);
       nextCheck = t + profile.checkEvery(t);
     }
     tick(s, dt);
@@ -144,7 +152,7 @@ function run(profile: Profile, seed: number): RunResult {
     const c = connectedCount(s);
     for (const m of MILESTONES) if (milestones[m] === null && c >= m) milestones[m] = t;
   }
-  return { milestones, longestGap, finalNps: computeRates(s).n, levels: { ...s.levels } };
+  return { milestones, longestGap, finalNps: computeRates(s).n, levels: { ...s.levels }, state: s, seconds: t };
 }
 
 const median = (xs: number[]) => {
@@ -179,5 +187,34 @@ for (const p of PROFILES) {
     problems++;
   }
 }
+// ---------- Mehrere Durchläufe mit Sporenflug ----------
+const GENOME_ORDER = ['p1', 'z1', 's1', 'p2', 'z2', 's2', 'p3', 'z3', 's3', 'p4', 'z4', 's4'] as const;
+console.log('\n=== Sporenflug: aktiver Spieler, 6 Durchläufe, Flug bei Zone-Ziel ===');
+const runTimes: number[][] = [];
+for (const seed of SEEDS.slice(0, 4)) {
+  let state: GameState | undefined;
+  const times: number[] = [];
+  const spores: number[] = [];
+  for (let r = 0; r < 6; r++) {
+    const res = run(PROFILES[0]!, seed * 100 + r, state);
+    times.push(res.seconds);
+    spores.push(sporeGain(res.state));
+    const next = prestige(res.state, seed * 100 + r + 1);
+    if (!next) break;
+    for (const id of GENOME_ORDER) if (genomeAvailable(next, id)) buyGenome(next, id);
+    state = next;
+  }
+  runTimes.push(times);
+  console.log(`Karte ${seed}: ${times.map((x, i) => `${formatDuration(x)} (+${spores[i]} Sp.)`).join(' → ')}`);
+}
+for (let r = 1; r < 6; r++) {
+  const prev = median(runTimes.map((x) => x[r - 1]!));
+  const cur = median(runTimes.map((x) => x[r]!));
+  if (!(cur < prev)) {
+    console.log(`  ⚠ Durchlauf ${r + 1} ist nicht schneller als Durchlauf ${r}`);
+    problems++;
+  }
+}
+
 console.log(problems ? `\n${problems} Balancing-Problem(e) gefunden.` : '\nKeine Balancing-Probleme gefunden.');
 if (problems) process.exit(1);
