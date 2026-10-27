@@ -1,13 +1,23 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Prototyp v0.4',
+  version: 'Prototyp v0.5',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
   res_water: 'Wasser',
   per_sec: '{v}/s',
   net_progress: 'Netz {c}/{goal}',
+  net_progress_z2: 'Wald {c}/{goal}',
+  season_fruehling: 'Frühling · Fäden schneller',
+  season_sommer: 'Sommer · mehr Zucker, weniger Wasser',
+  season_herbst: 'Herbst · Laub ×2',
+  season_winter: 'Winter · alles langsamer',
+  zone2_title: 'Zone 2: Der Wald',
+  zone2_body:
+    'Dein Netz ist groß genug für den ganzen Wald. Fäden reichen jetzt weiter und wachsen schneller. Aber du bist nicht allein: Konkurrenzpilze (violett) besetzen freie Knoten. Erobere sie zurück – oder greif ihre Kerne an. Ab jetzt wechseln die Jahreszeiten.',
+  zone2_done_title: 'Der Wald gehört dir!',
+  zone2_done_body: '{c} Knoten verbunden. Weitere Zonen folgen in einem Update. Mit jedem Sporenflug wirst du schneller.',
 
   node_spore: 'Ursprung',
   node_laub: 'Laubschicht',
@@ -15,6 +25,8 @@ export const de = {
   node_feucht: 'Feuchtstelle',
   node_baum: 'Baum',
   node_stein: 'Stein',
+  node_altbaum: 'Altbaum',
+  node_rivale: 'Konkurrenzpilz',
 
   desc_spore: 'Hier hat alles angefangen.',
   desc_laub: 'Kleiner, unerschöpflicher Nährstoffertrag.',
@@ -22,6 +34,12 @@ export const de = {
   desc_feucht: 'Liefert Wasser für deine Baum-Partner.',
   desc_baum: 'Partnerschaft: Der Baum gibt dir Zucker, wenn du ihm Wasser lieferst.',
   desc_stein: 'Hindernis. Fäden müssen außen herum wachsen.',
+  desc_altbaum: 'Ein uralter Baum. Viel Zucker, aber auch großer Durst.',
+  desc_rivale: 'Kern eines fremden Pilzes. Erobere ihn, und all seine Knoten werden frei – mit Belohnung.',
+  desc_owned: 'Von einem Konkurrenzpilz besetzt. Zurückerobern kostet mehr.',
+  desc_rivale_beaten: 'Besiegter Konkurrenzpilz. Jetzt arbeitet er für dich.',
+  reclaim_btn: 'Zurückerobern · {cost}',
+  attack_btn: 'Kern angreifen · {cost}',
 
   yield_n: '+{v} Nährstoffe/s',
   yield_water: '+{v} Wasser/s',
@@ -148,6 +166,16 @@ export const de = {
   ach_genome_branch_desc: 'Vervollständige einen Ast im Genom.',
   ach_genome_all: 'Perfektes Genom',
   ach_genome_all_desc: 'Alle 12 Mutationen.',
+  ach_zone2: 'Ins Freie',
+  ach_zone2_desc: 'Erreiche Zone 2.',
+  ach_net_60: 'Der ganze Wald',
+  ach_net_60_desc: '60 Knoten in einem Wald.',
+  ach_altbaum: 'Uralter Freund',
+  ach_altbaum_desc: 'Verbinde einen Altbaum.',
+  ach_rival: 'Revierkampf',
+  ach_rival_desc: 'Besiege einen Konkurrenzpilz.',
+  ach_year: 'Ein ganzes Jahr',
+  ach_year_desc: 'Erlebe alle vier Jahreszeiten.',
 
   ev_regen: 'Regen: Fäden wachsen doppelt so schnell · {t}',
   ev_duerre: 'Dürre: Wasser wird knapp · {t}',

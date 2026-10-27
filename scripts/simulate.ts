@@ -49,8 +49,8 @@ const PROFILES: Profile[] = [
 ];
 
 const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8];
-const MAX_SECONDS = 6 * 3600;
-const MILESTONES = [1, 5, 10, 15, 20, 25];
+const MAX_SECONDS = 12 * 3600;
+const MILESTONES = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60];
 
 /** Bewertet ein Ziel: neuer Ertrag pro Kosten (einfacher, gieriger Spieler). */
 function targetScore(s: GameState, id: number, cost: number): number {
@@ -69,6 +69,12 @@ function targetScore(s: GameState, id: number, cost: number): number {
       break;
     case 'baum':
       value = 2.5;
+      break;
+    case 'altbaum':
+      value = 8;
+      break;
+    case 'rivale':
+      value = 30;
       break;
     default:
       value = 0;
@@ -121,18 +127,33 @@ interface RunResult {
   longestGap: number;
   finalNps: number;
   levels: GameState['levels'];
+  state: GameState;
+  seconds: number;
 }
 
-function run(profile: Profile, seed: number, start?: GameState): RunResult & { state: GameState; seconds: number } {
-  const s = start ?? newGame(seed);
-  const dt = 1 / CONFIG.ticksPerSecond;
+interface RunOptions {
+  start?: GameState;
+  goal?: number;
+  /** Abbruch, z. B. für einen Sporenflug: bekommt Zeit seit dem letzten neuen Knoten */
+  stopWhen?: (s: GameState, sinceNode: number) => boolean;
+  maxSeconds?: number;
+}
+
+/** Spielt einen Durchlauf. Schritt 0,25 s – genau genug und schnell. */
+function run(profile: Profile, seed: number, opt: RunOptions = {}): RunResult {
+  const s = opt.start ?? newGame(seed);
+  const goal = opt.goal ?? CONFIG.zoneGoal;
+  const max = opt.maxSeconds ?? MAX_SECONDS;
+  const dt = 0.25;
   const milestones: Record<number, number | null> = Object.fromEntries(MILESTONES.map((m) => [m, null]));
   let t = 0;
   let nextCheck = 0;
   let tapAcc = 0;
   let lastAction = 0;
   let longestGap = 0;
-  while (t < MAX_SECONDS && connectedCount(s) < CONFIG.zoneGoal) {
+  let lastCount = connectedCount(s);
+  let lastNodeAt = 0;
+  while (t < max && connectedCount(s) < goal) {
     if (s.events.golden && profile.checkEvery(t) <= 1) catchGolden(s);
     tapAcc += profile.tapsPerSecond(t) * dt;
     while (tapAcc >= 1) {
@@ -146,10 +167,15 @@ function run(profile: Profile, seed: number, start?: GameState): RunResult & { s
       }
       checkAchievements(s);
       nextCheck = t + profile.checkEvery(t);
+      if (opt.stopWhen?.(s, t - lastNodeAt)) break;
     }
     tick(s, dt);
     t += dt;
     const c = connectedCount(s);
+    if (c > lastCount) {
+      lastCount = c;
+      lastNodeAt = t;
+    }
     for (const m of MILESTONES) if (milestones[m] === null && c >= m) milestones[m] = t;
   }
   return { milestones, longestGap, finalNps: computeRates(s).n, levels: { ...s.levels }, state: s, seconds: t };
@@ -161,10 +187,12 @@ const median = (xs: number[]) => {
 };
 
 let problems = 0;
+
+// ---------- Teil 1: erster Durchlauf, Zone 1 ----------
 for (const p of PROFILES) {
-  console.log(`\n=== ${p.name} – ${SEEDS.length} Karten ===`);
+  console.log(`\n=== Zone 1 · ${p.name} – ${SEEDS.length} Karten ===`);
   const results = SEEDS.map((seed) => run(p, seed));
-  for (const m of MILESTONES) {
+  for (const m of MILESTONES.filter((x) => x <= CONFIG.zoneGoal)) {
     const times = results.map((r) => r.milestones[m]).filter((x): x is number => x !== null);
     const label = `${String(m).padStart(2)} Knoten`;
     if (times.length < results.length) {
@@ -174,10 +202,8 @@ for (const p of PROFILES) {
   }
   const gap = median(results.map((r) => r.longestGap));
   console.log(`Längste Pause ohne Aktion (Median): ${formatDuration(gap)}`);
-  const lv = results[0]!.levels;
-  console.log(`Upgrades (Karte 1): Hyphen ${lv.hyphen}, Enzym ${lv.enzym}, Frucht ${lv.frucht}, Rhizo ${lv.rhizo}`);
   const zone = results.map((r) => r.milestones[CONFIG.zoneGoal]).filter((x): x is number => x !== null);
-  // Prototyp-Ziel: Zone 1 aktiv in 10–45 Minuten (schnell genug zum Testen, lang genug für Entscheidungen)
+  // Ziel: Zone 1 aktiv in 10–45 Minuten (schnell genug zum Testen, lang genug für Entscheidungen)
   if (p.active && zone.length && (median(zone) < 600 || median(zone) > 2700)) {
     console.log('  ⚠ Zone-1-Dauer liegt außerhalb des Ziels von 10–45 Minuten');
     problems++;
@@ -187,32 +213,60 @@ for (const p of PROFILES) {
     problems++;
   }
 }
-// ---------- Mehrere Durchläufe mit Sporenflug ----------
+
+// ---------- Teil 2: Kampagne mit Sporenflügen bis Zone 2 geschafft ----------
 const GENOME_ORDER = ['p1', 'z1', 's1', 'p2', 'z2', 's2', 'p3', 'z3', 's3', 'p4', 'z4', 's4'] as const;
-console.log('\n=== Sporenflug: aktiver Spieler, 6 Durchläufe, Flug bei Zone-Ziel ===');
-const runTimes: number[][] = [];
-for (const seed of SEEDS.slice(0, 4)) {
-  let state: GameState | undefined;
-  const times: number[] = [];
-  const spores: number[] = [];
-  for (let r = 0; r < 6; r++) {
-    const res = run(PROFILES[0]!, seed * 100 + r, state);
-    times.push(res.seconds);
-    spores.push(sporeGain(res.state));
-    const next = prestige(res.state, seed * 100 + r + 1);
-    if (!next) break;
-    for (const id of GENOME_ORDER) if (genomeAvailable(next, id)) buyGenome(next, id);
-    state = next;
+/** Ein vernünftiger Spieler fliegt, wenn er 5 Min. keinen Knoten mehr schafft und der Flug sich lohnt. */
+const shouldFly = (s: GameState, sinceNode: number) =>
+  sinceNode > 300 && sporeGain(s) >= Math.max(3, 0.25 * s.meta.sporesTotal) && connectedCount(s) >= CONFIG.prestige.minNodes;
+
+for (const p of [PROFILES[0]!, PROFILES[1]!]) {
+  console.log(`\n=== Kampagne bis ${CONFIG.zone2.goal} Knoten · ${p.name} – 4 Karten ===`);
+  const totals: number[] = [];
+  const gaps: number[] = [];
+  for (const seed of SEEDS.slice(0, 4)) {
+    let state: GameState | undefined;
+    let total = 0;
+    let zone2At: number | null = null;
+    let done = false;
+    let runs = 0;
+    let worstGap = 0;
+    const lines: string[] = [];
+    while (!done && runs < 40 && total < 40 * 3600) {
+      const res = run(p, seed * 1000 + runs, { start: state, goal: CONFIG.zone2.goal, stopWhen: shouldFly, maxSeconds: 6 * 3600 });
+      if (zone2At === null && res.milestones[CONFIG.zone2.unlockAt] !== null) zone2At = total + res.milestones[CONFIG.zone2.unlockAt]!;
+      total += res.seconds;
+      runs++;
+      if (runs > 1) worstGap = Math.max(worstGap, res.longestGap);
+      lines.push(`${formatDuration(res.seconds)}/${connectedCount(res.state)}K/+${sporeGain(res.state)}Sp`);
+      if (connectedCount(res.state) >= CONFIG.zone2.goal) {
+        done = true;
+        break;
+      }
+      const next = prestige(res.state, seed * 1000 + runs);
+      if (!next) break;
+      for (const id of GENOME_ORDER) if (genomeAvailable(next, id)) buyGenome(next, id);
+      state = next;
+    }
+    totals.push(done ? total : Infinity);
+    gaps.push(worstGap);
+    console.log(`Karte ${seed}: ${done ? 'geschafft' : 'NICHT geschafft'} in ${formatDuration(total)}, ${runs} Durchläufe, Zone 2 ab ${zone2At === null ? '–' : formatDuration(zone2At)}`);
+    console.log(`  ${lines.join(' → ')}`);
   }
-  runTimes.push(times);
-  console.log(`Karte ${seed}: ${times.map((x, i) => `${formatDuration(x)} (+${spores[i]} Sp.)`).join(' → ')}`);
-}
-for (let r = 1; r < 6; r++) {
-  const prev = median(runTimes.map((x) => x[r - 1]!));
-  const cur = median(runTimes.map((x) => x[r]!));
-  if (!(cur < prev)) {
-    console.log(`  ⚠ Durchlauf ${r + 1} ist nicht schneller als Durchlauf ${r}`);
-    problems++;
+  const med = median(totals);
+  console.log(`Gesamtzeit bis Zone 2 geschafft (Median): ${Number.isFinite(med) ? formatDuration(med) : 'nicht erreicht'}`);
+  console.log(`Längste Pause ab Durchlauf 2 (Median): ${formatDuration(median(gaps))}`);
+  if (p.active) {
+    // Ziel: selbst der Dauertipper (5 Tipps/s ohne Pause – die obere Grenze) braucht 2–12 Std. reine Spielzeit.
+    // Normale Spieler liegen deutlich darüber und verteilen das auf mehrere Tage.
+    if (!(med >= 2 * 3600 && med <= 12 * 3600)) {
+      console.log('  ⚠ Zone-2-Gesamtdauer liegt außerhalb von 2–12 Stunden');
+      problems++;
+    }
+    if (median(gaps) > 300) {
+      console.log('  ⚠ Tote Phasen über 5 Minuten in späteren Durchläufen');
+      problems++;
+    }
   }
 }
 

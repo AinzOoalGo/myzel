@@ -35,6 +35,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'spore_5', check: (s) => s.meta.runs >= 5 },
   { id: 'genome_branch', check: (s) => ['z4', 's4', 'p4'].some((id) => s.meta.genome.includes(id as never)) },
   { id: 'genome_all', check: (s) => s.meta.genome.length >= CONFIG.genome.length },
+  { id: 'zone2', check: (s) => s.zone >= 2 },
+  { id: 'net_60', check: (s) => connectedCount(s) >= CONFIG.zone2.goal },
+  { id: 'altbaum', check: (s) => countType(s, 'altbaum') >= 1 },
+  { id: 'rival', check: (s) => s.meta.lifetime.rivalsBeaten >= 1 },
+  { id: 'year', check: (s) => s.meta.lifetime.seasons === 0b1111 },
 ];
 
 /** Prüft alle Erfolge, trägt neue ein und gibt deren IDs zurück. */

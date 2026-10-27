@@ -1,5 +1,5 @@
 import type { NodeType } from '../core/config';
-import { findSource, growthSpeed, reach, type GameState } from '../core/game';
+import { findSource, growthSpeed, reach, season, type GameState } from '../core/game';
 import type { MapNode } from '../core/map';
 import { createRng } from '../core/rng';
 import { buildHypha, pointAt, subtreeWeights, type Hypha, type Path } from './geometry';
@@ -16,10 +16,14 @@ export const NODE_COLORS: Record<NodeType, string> = {
   feucht: '#4f9be0',
   baum: '#4fae63',
   stein: '#86817a',
+  altbaum: '#3f9a57',
+  rivale: '#a77be8',
 };
 
 const GLOW_WARM = 'rgba(255,196,120,';
 const CORE = 'rgba(255,240,214,';
+const GLOW_RIVAL = 'rgba(150,100,255,';
+const CORE_RIVAL = 'rgba(215,190,255,';
 
 interface Particle {
   x: number;
@@ -112,6 +116,8 @@ export class Renderer {
   private sightAlpha = new Map<number, number>();
   private reachable = new Set<number>();
   private hyphae = new Map<string, Hypha>();
+  private rivalHyphae = new Map<string, Hypha>();
+  private visibleIds = new Set<number>();
   private weights = new Map<number, number>();
   private growthPath: { key: string; hypha: Hypha } | null = null;
 
@@ -119,6 +125,7 @@ export class Renderer {
   private glowGreen = makeSprite('rgba(200,255,200,0.9)', 'rgba(80,190,110,0.25)');
   private glowBlue = makeSprite('rgba(210,235,255,0.9)', 'rgba(80,150,230,0.25)');
   private glowGold = makeSprite('rgba(255,245,200,1)', 'rgba(255,190,40,0.45)');
+  private glowRival = makeSprite('rgba(230,210,255,0.9)', 'rgba(140,90,255,0.3)');
   private soil: CanvasPattern | null;
   selected: number | null = null;
 
@@ -226,7 +233,8 @@ export class Renderer {
   // ---------- Zwischenspeicher ----------
 
   private refresh(s: GameState): void {
-    const key = `${s.seed}|${s.edges.length}|${s.levels.rhizo}|${s.growth ? s.growth.to : -1}`;
+    const rivalKey = s.rivals.map((r) => `${r.alive ? 1 : 0}${r.edges.length}`).join(',');
+    const key = `${s.seed}|${s.zone}|${s.edges.length}|${s.levels.rhizo}|${s.growth ? s.growth.to : -1}|${rivalKey}|${s.meta.genome.length}`;
     if (key === this.cacheKey) return;
     this.cacheKey = key;
     const r = reach(s);
@@ -235,6 +243,7 @@ export class Renderer {
     this.visible = [];
     this.sightAlpha.clear();
     for (const n of s.nodes) {
+      if (n.zone > s.zone) continue;
       let d = Infinity;
       for (const c of connected) d = Math.min(d, Math.hypot(c.x - n.x, c.y - n.y));
       if (d > sight) continue;
@@ -242,7 +251,15 @@ export class Renderer {
       // hinter der Reichweite langsam im Nebel verschwinden
       this.sightAlpha.set(n.id, d <= r ? 1 : Math.max(0.12, 1 - (d - r) / (sight - r)));
     }
+    this.visibleIds = new Set(this.visible.map((n) => n.id));
     this.reachable = new Set(this.visible.filter((n) => !n.connected && findSource(s, n.id)).map((n) => n.id));
+    this.rivalHyphae.clear();
+    for (const r of s.rivals) {
+      for (const e of r.edges) {
+        if (!this.visibleIds.has(e.from) && !this.visibleIds.has(e.to)) continue;
+        this.rivalHyphae.set(`${e.from}>${e.to}`, buildHypha(s.nodes[e.from]!, s.nodes[e.to]!));
+      }
+    }
     for (const e of s.edges) {
       const k = `${e.from}>${e.to}`;
       if (!this.hyphae.has(k)) this.hyphae.set(k, buildHypha(s.nodes[e.from]!, s.nodes[e.to]!));
@@ -369,6 +386,7 @@ export class Renderer {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     const boost = 1 + this.energy * 0.7;
+    for (const h of this.rivalHyphae.values()) this.strokeHypha(h, h.main.total, 2.2, 1, px, true);
     for (const e of s.edges) {
       const h = this.hyphae.get(`${e.from}>${e.to}`);
       if (!h) continue;
@@ -399,6 +417,7 @@ export class Renderer {
         const h = this.hyphae.get(`${e.from}>${e.to}`);
         if (!h) continue;
         const total = h.main.total;
+        if (total < 12 * px) continue;
         const n = s.nodes[e.to]!;
         const producing = n.type !== 'totholz' || n.stock > 0;
         const count = producing ? 1 + Math.min(2, Math.floor((this.weights.get(e.to) ?? 1) / 4)) : 0;
@@ -479,6 +498,22 @@ export class Renderer {
     } else if (drought) {
       ctx.fillStyle = 'rgba(190,120,40,0.10)';
       ctx.fillRect(0, 0, this.w, this.h);
+    }
+    const se = season(s);
+    if (se) {
+      const tint = { fruehling: 'rgba(120,200,120,0.04)', sommer: 'rgba(255,210,120,0.04)', herbst: 'rgba(220,120,40,0.07)', winter: 'rgba(200,220,255,0.08)' }[se];
+      ctx.fillStyle = tint;
+      ctx.fillRect(0, 0, this.w, this.h);
+      if (se === 'winter' && !this.reducedMotion) {
+        ctx.fillStyle = 'rgba(240,245,255,0.6)';
+        for (let i = 0; i < 50; i++) {
+          const x = ((i * 71.3 + Math.sin(time * 0.7 + i) * 20) % this.w + this.w) % this.w;
+          const y = ((i * 37.9 + time * 25) % (this.h + 10)) - 5;
+          ctx.beginPath();
+          ctx.arc(x, y, 1 + (i % 3) * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
     // Vignette
     const vg = ctx.createRadialGradient(this.w / 2, this.h / 2, Math.min(this.w, this.h) * 0.3, this.w / 2, this.h / 2, Math.max(this.w, this.h) * 0.75);
@@ -564,25 +599,30 @@ export class Renderer {
   }
 
   /** Drei Lagen: breiter Schein, mittlerer Schein, heller Kern. */
-  private strokeHypha(h: Hypha, upTo: number, width: number, boost: number, px: number): void {
+  private strokeHypha(h: Hypha, upTo: number, width: number, boost: number, px: number, rival = false): void {
     const { ctx } = this;
+    const glow = rival ? GLOW_RIVAL : GLOW_WARM;
+    const core = rival ? CORE_RIVAL : CORE;
+    width = Math.max(width, 1.2 * px);
     this.tracePath(h.main, upTo);
-    ctx.strokeStyle = `${GLOW_WARM}${0.07 * boost})`;
+    ctx.strokeStyle = `${glow}${0.07 * boost})`;
     ctx.lineWidth = width * 5 + 4 * px;
     ctx.stroke();
-    ctx.strokeStyle = `${GLOW_WARM}${0.16 * boost})`;
+    ctx.strokeStyle = `${glow}${0.16 * boost})`;
     ctx.lineWidth = width * 2.2;
     ctx.stroke();
-    ctx.strokeStyle = `${CORE}${Math.min(1, 0.75 * boost)})`;
+    ctx.strokeStyle = `${core}${Math.min(1, 0.75 * boost)})`;
     ctx.lineWidth = Math.max(px, width * 0.8);
     ctx.stroke();
     const done = upTo / h.main.total;
+    // Härchen nur, wenn man sie überhaupt sehen kann
+    if (h.main.total < 40 * px) return;
     ctx.lineWidth = Math.max(0.8 * px, width * 0.3);
     for (const hair of h.hairs) {
       if (hair.at > done) continue;
       const grow = Math.min(1, (done - hair.at) * 6);
       this.tracePath(hair.path, hair.path.total * grow);
-      ctx.strokeStyle = `${CORE}${0.35 * boost})`;
+      ctx.strokeStyle = `${core}${0.35 * boost})`;
       ctx.stroke();
     }
   }
@@ -591,7 +631,16 @@ export class Renderer {
     const { ctx } = this;
     const alpha = n.connected ? 1 : (this.sightAlpha.get(n.id) ?? 1) * (n.type === 'stein' ? 0.85 : 0.55);
     const rng = createRng(n.id * 9301 + 49297);
-    const r = n.r;
+    // Zone-2-Knoten beim Herauszoomen nie kleiner als ein paar Pixel; Zone 1 darf winzig werden
+    const r = n.zone === 2 ? Math.max(n.r, 5 * px) : n.r;
+    // fast unsichtbar klein: als Punkt zeichnen und fertig (spart viel Zeit beim Herauszoomen)
+    if (r < 1.5 * px && !n.connected) {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = NODE_COLORS[n.type];
+      ctx.fillRect(n.x - px, n.y - px, 2 * px, 2 * px);
+      ctx.globalAlpha = 1;
+      return;
+    }
     ctx.globalAlpha = alpha;
     switch (n.type) {
       case 'spore': {
@@ -672,6 +721,49 @@ export class Renderer {
         ctx.fill();
         break;
       }
+      case 'altbaum': {
+        if (n.connected) {
+          ctx.globalCompositeOperation = 'lighter';
+          this.sprite(this.glowGreen, n.x, n.y, r * 5, 0.5);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.strokeStyle = '#3a2a1a';
+        ctx.lineWidth = Math.max(px, r * 0.1);
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2 + rng() * 0.5;
+          const l = r * (1.3 + rng() * 0.5);
+          ctx.beginPath();
+          ctx.moveTo(n.x, n.y);
+          ctx.quadraticCurveTo(n.x + Math.cos(a + 0.5) * l * 0.6, n.y + Math.sin(a + 0.5) * l * 0.6, n.x + Math.cos(a) * l, n.y + Math.sin(a) * l);
+          ctx.stroke();
+        }
+        for (const [k, col] of [[1, '#24552f'], [0.8, '#2f6b3b'], [0.58, '#3f9a57'], [0.3, '#7cc98c']] as const) {
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.arc(n.x - r * (1 - k) * 0.3, n.y - r * (1 - k) * 0.3, r * k * 0.95, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      case 'rivale': {
+        ctx.globalCompositeOperation = 'lighter';
+        this.sprite(this.glowRival, n.x, n.y, r * 5 * (1 + Math.sin(time * 1.7 + n.id) * 0.08), n.owner > 0 ? 0.8 : 0.2);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = n.owner > 0 ? '#3b2266' : '#3d342b';
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2;
+          const rr = r * (0.75 + 0.25 * Math.sin(i * 2.3 + n.id));
+          ctx.lineTo(n.x + Math.cos(a) * rr, n.y + Math.sin(a) * rr);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = n.owner > 0 ? NODE_COLORS.rivale : '#6a5e52';
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
       case 'baum': {
         if (n.connected) {
           ctx.globalCompositeOperation = 'lighter';
@@ -727,8 +819,15 @@ export class Renderer {
       }
     }
     ctx.globalAlpha = 1;
+    if (n.owner > 0 && n.type !== 'rivale') {
+      ctx.strokeStyle = 'rgba(180,140,255,0.9)';
+      ctx.lineWidth = 2 * px;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r * 1.1 + 2 * px, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     // erreichbare Knoten: rotierender gestrichelter Ring
-    if (this.reachable.has(n.id)) {
+    if (this.reachable.has(n.id) && r >= 3 * px) {
       ctx.setLineDash([4 * px, 4 * px]);
       ctx.lineDashOffset = -time * 8 * px;
       ctx.strokeStyle = 'rgba(255,236,200,0.85)';

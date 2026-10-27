@@ -1,6 +1,7 @@
 import { type GenomeId, type UpgradeId } from './config';
 import { generateMap } from './map';
-import { mods, newMeta, simulate, type Edge, type EventsState, type GameState, type Growth, type Meta } from './game';
+import { connectedCount, mods, newGame, newMeta, simulate, type Edge, type EventsState, type GameState, type Growth, type Meta, type Rival } from './game';
+import { CONFIG } from './config';
 
 /**
  * Spielstände sind versioniert. Bei jeder Formatänderung:
@@ -9,10 +10,10 @@ import { mods, newMeta, simulate, type Edge, type EventsState, type GameState, t
  *  3. einen Test mit einem echten alten Spielstand hinzufügen
  * So gehen alte Spielstände bei Updates nie verloren.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
-export interface SaveV2 {
-  v: 2;
+export interface SaveV3 {
+  v: 3;
   savedAt: number; // ms seit Epoche
   seed: number;
   connected: number[];
@@ -24,6 +25,11 @@ export interface SaveV2 {
   stats: GameState['stats'];
   meta: Meta;
   events: EventsState;
+  zone: 1 | 2;
+  zone2Since: number | null;
+  /** Knoten-ID → Rivale (nur besetzte) */
+  owners: Record<string, number>;
+  rivals: { edges: [number, number][]; nextAt: number; alive: boolean }[];
 }
 
 type AnySave = { v: number } & Record<string, unknown>;
@@ -37,18 +43,25 @@ const MIGRATIONS: Record<number, (old: AnySave) => AnySave> = {
     meta.lifetime.playSeconds = num(stats.playSeconds);
     return { ...s, v: 2, meta, events: { active: null, golden: null, nextAt: num(stats.playSeconds) + 150, counter: 0 } };
   },
+  // v2 → v3: Zone 2, Konkurrenzpilze, Jahreszeiten. Wer schon 25 Knoten hat, landet direkt in Zone 2.
+  2: (s) => {
+    const connected = Array.isArray(s.connected) ? s.connected.length : 0;
+    const stats = (s.stats ?? {}) as Partial<GameState['stats']>;
+    const z2 = connected >= CONFIG.zone2.unlockAt;
+    return { ...s, v: 3, zone: z2 ? 2 : 1, zone2Since: z2 ? num(stats.playSeconds) : null, owners: {}, rivals: [] };
+  },
 };
 
 const num = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 
-export function serialize(s: GameState, now: number): SaveV2 {
+export function serialize(s: GameState, now: number): SaveV3 {
   const fresh = generateMap(s.seed);
   const stocks: Record<string, number> = {};
   for (const n of s.nodes) {
     if (n.type === 'totholz' && n.stock !== fresh[n.id]?.stock) stocks[n.id] = n.stock;
   }
   return {
-    v: 2,
+    v: 3,
     savedAt: now,
     seed: s.seed,
     connected: s.nodes.filter((n) => n.connected && n.type !== 'spore').map((n) => n.id),
@@ -60,10 +73,14 @@ export function serialize(s: GameState, now: number): SaveV2 {
     stats: { ...s.stats },
     meta: structuredClone(s.meta),
     events: structuredClone(s.events),
+    zone: s.zone,
+    zone2Since: s.zone2Since,
+    owners: Object.fromEntries(s.nodes.filter((n) => n.owner > 0 && n.type !== 'rivale').map((n) => [n.id, n.owner])),
+    rivals: s.rivals.map((r) => ({ edges: r.edges.map((e) => [e.from, e.to] as [number, number]), nextAt: r.nextAt, alive: r.alive })),
   };
 }
 
-function migrate(raw: AnySave): SaveV2 {
+function migrate(raw: AnySave): SaveV3 {
   let cur = raw;
   while (cur.v < SAVE_VERSION) {
     const step = MIGRATIONS[cur.v];
@@ -71,7 +88,7 @@ function migrate(raw: AnySave): SaveV2 {
     cur = step(cur);
   }
   if (cur.v !== SAVE_VERSION) throw new Error(`Spielstand-Version ${cur.v} ist neuer als dieses Spiel`);
-  return cur as unknown as SaveV2;
+  return cur as unknown as SaveV3;
 }
 
 const GENOME_IDS = new Set<GenomeId>(['z1', 'z2', 'z3', 'z4', 's1', 's2', 's3', 's4', 'p1', 'p2', 'p3', 'p4']);
@@ -92,6 +109,8 @@ function readMeta(m: Partial<Meta> | undefined): Meta {
       goldCaught: num(lt.goldCaught),
       rainSeen: num(lt.rainSeen),
       playSeconds: num(lt.playSeconds),
+      seasons: num(lt.seasons),
+      rivalsBeaten: num(lt.rivalsBeaten),
     },
   };
 }
@@ -99,7 +118,9 @@ function readMeta(m: Partial<Meta> | undefined): Meta {
 export function deserialize(raw: unknown): GameState {
   if (!raw || typeof raw !== 'object' || typeof (raw as AnySave).v !== 'number') throw new Error('Ungültiger Spielstand');
   const d = migrate(raw as AnySave);
-  const nodes = generateMap(num(d.seed));
+  // Grundgerüst inkl. Rivalen aus der Karte, dann den gespeicherten Zustand darüberlegen
+  const base = newGame(num(d.seed), newMeta());
+  const nodes = base.nodes;
   for (const id of d.connected ?? []) {
     const n = nodes[id];
     if (n) n.connected = true;
@@ -111,7 +132,21 @@ export function deserialize(raw: unknown): GameState {
   const edges: Edge[] = (d.edges ?? []).map(([from, to]) => ({ from, to }));
   const lv = d.levels ?? ({} as Record<UpgradeId, number>);
   const ev = d.events ?? ({} as Partial<EventsState>);
-  return {
+  const rivals: Rival[] = base.rivals.map((r, i) => {
+    const saved = d.rivals?.[i];
+    if (!saved) return r;
+    return { core: r.core, edges: (saved.edges ?? []).map(([from, to]) => ({ from, to })), nextAt: num(saved.nextAt), alive: saved.alive !== false };
+  });
+  for (const [id, owner] of Object.entries(d.owners ?? {})) {
+    const n = nodes[Number(id)];
+    if (n && !n.connected && rivals[num(owner) - 1]) n.owner = num(owner);
+  }
+  rivals.forEach((r, i) => {
+    const core = nodes[r.core];
+    if (core) core.owner = r.alive ? i + 1 : 0;
+  });
+  const zone: 1 | 2 = d.zone === 2 ? 2 : 1;
+  const state: GameState = {
     seed: num(d.seed),
     nodes,
     edges,
@@ -123,10 +158,20 @@ export function deserialize(raw: unknown): GameState {
       taps: num(d.stats?.taps),
       playSeconds: num(d.stats?.playSeconds),
       zoneDoneAt: d.stats?.zoneDoneAt ?? null,
+      zone2DoneAt: d.stats?.zone2DoneAt ?? null,
     },
     meta: readMeta(d.meta),
     events: { active: ev.active ?? null, golden: ev.golden ?? null, nextAt: num(ev.nextAt, 150), counter: num(ev.counter) },
+    zone,
+    zone2Since: zone === 2 ? num(d.zone2Since, num(d.stats?.playSeconds)) : null,
+    rivals,
   };
+  // Sicherheitsnetz: Zone 2 freischalten, falls die Bedingung erfüllt ist
+  if (state.zone < 2 && connectedCount(state) >= CONFIG.zone2.unlockAt) {
+    state.zone = 2;
+    state.zone2Since = state.stats.playSeconds;
+  }
+  return state;
 }
 
 /** Text-Export (Base64 von JSON), damit Spieler ihren Stand sichern können. */

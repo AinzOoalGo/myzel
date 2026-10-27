@@ -1,4 +1,4 @@
-import { CONFIG, type EventType, type GenomeDef, type GenomeId, type UpgradeDef, type UpgradeId } from './config';
+import { CONFIG, type EventType, type GenomeDef, type GenomeId, type Season, type UpgradeDef, type UpgradeId } from './config';
 import { generateMap, pointSegmentDistance, type MapNode } from './map';
 import { createRng } from './rng';
 
@@ -27,7 +27,15 @@ export interface Meta {
   runs: number; // abgeschlossene Sporenflüge
   genome: GenomeId[];
   achievements: string[];
-  lifetime: { totalN: number; taps: number; goldCaught: number; rainSeen: number; playSeconds: number };
+  lifetime: { totalN: number; taps: number; goldCaught: number; rainSeen: number; playSeconds: number; seasons: number; rivalsBeaten: number };
+}
+
+/** Konkurrenzpilz: besetzt nach und nach freie Knoten in Zone 2. */
+export interface Rival {
+  core: number; // Knoten-ID des Kerns
+  edges: Edge[];
+  nextAt: number; // Spielsekunden
+  alive: boolean;
 }
 
 export interface ActiveEvent {
@@ -56,9 +64,13 @@ export interface GameState {
   levels: Record<UpgradeId, number>;
   growth: Growth | null;
   /** Werte des aktuellen Durchlaufs */
-  stats: { totalN: number; taps: number; playSeconds: number; zoneDoneAt: number | null };
+  stats: { totalN: number; taps: number; playSeconds: number; zoneDoneAt: number | null; zone2DoneAt: number | null };
   meta: Meta;
   events: EventsState;
+  zone: 1 | 2;
+  /** Spielsekunde, ab der Zone 2 offen ist (für die Jahreszeiten) */
+  zone2Since: number | null;
+  rivals: Rival[];
 }
 
 export interface Rates {
@@ -77,7 +89,7 @@ export function newMeta(): Meta {
     runs: 0,
     genome: [],
     achievements: [],
-    lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0 },
+    lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0, seasons: 0, rivalsBeaten: 0 },
   };
 }
 
@@ -89,10 +101,14 @@ export function newGame(seed = Math.floor(Math.random() * 2 ** 31), meta: Meta =
     res: { n: 0, sugar: 0, water: 0 },
     levels: { hyphen: 0, enzym: 0, frucht: 0, rhizo: 0 },
     growth: null,
-    stats: { totalN: 0, taps: 0, playSeconds: 0, zoneDoneAt: null },
+    stats: { totalN: 0, taps: 0, playSeconds: 0, zoneDoneAt: null, zone2DoneAt: null },
     meta,
     events: { active: null, golden: null, nextAt: CONFIG.events.firstAt, counter: 0 },
+    zone: 1,
+    zone2Since: null,
+    rivals: [],
   };
+  initRivals(s);
   if (has(s, 'p4')) s.res.n = CONFIG.genomeEffects.p4Start;
   return s;
 }
@@ -106,26 +122,53 @@ export function eventActive(s: GameState, type: ActiveEvent['type']): boolean {
 }
 
 /** Alle Multiplikatoren an einer Stelle: Genom, Sporen, Erfolge, Ereignisse. */
+const isTree = (n: MapNode): boolean => n.type === 'baum' || n.type === 'altbaum';
+
+/** Aktuelle Jahreszeit – erst ab Zone 2. */
+export function season(s: GameState): Season | null {
+  if (s.zone < 2 || s.zone2Since === null) return null;
+  const c = CONFIG.seasons;
+  const i = Math.floor(Math.max(0, s.stats.playSeconds - s.zone2Since) / c.length) % c.order.length;
+  return c.order[i] ?? null;
+}
+
+/** Sekunden bis zur nächsten Jahreszeit. */
+export function seasonLeft(s: GameState): number {
+  if (s.zone2Since === null) return 0;
+  const len = CONFIG.seasons.length;
+  return len - (Math.max(0, s.stats.playSeconds - s.zone2Since) % len);
+}
+
+/** Alle Multiplikatoren an einer Stelle: Genom, Sporen, Erfolge, Ereignisse, Zone, Jahreszeit. */
 export function mods(s: GameState) {
   const g = CONFIG.genomeEffects;
-  const trees = has(s, 's4') ? s.nodes.reduce((c, n) => c + (n.connected && n.type === 'baum' ? 1 : 0), 0) : 0;
+  const sc = CONFIG.seasons;
+  const se = season(s);
+  const z2 = s.zone >= 2;
+  const trees = has(s, 's4') ? s.nodes.reduce((c, n) => c + (n.connected && isTree(n) ? 1 : 0), 0) : 0;
   const global =
     (1 + CONFIG.prestige.sporeBonus * s.meta.sporesTotal) *
     (1 + CONFIG.achievementBonus * s.meta.achievements.length) *
-    (1 + g.s4PerTree * trees);
+    (1 + g.s4PerTree * trees) *
+    (se === 'winter' ? sc.winter.global : 1);
   return {
     global,
     tap: has(s, 'z3') ? g.z3Tap : 1,
     decomp: (1 + CONFIG.effects.enzymDecomp * s.levels.enzym) * (has(s, 'z1') ? g.z1Decomp : 1),
-    laub: has(s, 'z4') ? g.z4Laub : 1,
+    laub: (has(s, 'z4') ? g.z4Laub : 1) * (se === 'herbst' ? sc.herbst.laub : 1),
     stock: has(s, 'z2') ? g.z2Stock : 1,
-    sugar: has(s, 's1') ? g.s1Sugar : 1,
-    water: (has(s, 's2') ? g.s2Water : 1) * (eventActive(s, 'regen') ? CONFIG.events.regen.water : 1),
+    sugar: (has(s, 's1') ? g.s1Sugar : 1) * (se === 'sommer' ? sc.sommer.sugar : 1),
+    water:
+      (has(s, 's2') ? g.s2Water : 1) * (eventActive(s, 'regen') ? CONFIG.events.regen.water : 1) * (se === 'sommer' ? sc.sommer.water : 1),
     waterCap: CONFIG.waterCap * (has(s, 's2') ? g.s2Cap : 1),
     growthCost: CONFIG.effects.rhizoCost ** s.levels.rhizo * (has(s, 'p1') ? g.p1Cost : 1),
     growthSpeed:
-      (1 + CONFIG.effects.rhizoSpeed * s.levels.rhizo) * (has(s, 'p3') ? g.p3Speed : 1) * (eventActive(s, 'regen') ? CONFIG.events.regen.growth : 1),
-    reach: CONFIG.growth.reach + CONFIG.growth.reachPerRhizo * s.levels.rhizo + (has(s, 'p2') ? g.p2Reach : 0),
+      (1 + CONFIG.effects.rhizoSpeed * s.levels.rhizo) *
+      (has(s, 'p3') ? g.p3Speed : 1) *
+      (eventActive(s, 'regen') ? CONFIG.events.regen.growth : 1) *
+      (z2 ? CONFIG.zone2.speedBonus : 1) *
+      (se === 'fruehling' ? sc.fruehling.growth : se === 'winter' ? sc.winter.growth : 1),
+    reach: CONFIG.growth.reach + CONFIG.growth.reachPerRhizo * s.levels.rhizo + (has(s, 'p2') ? g.p2Reach : 0) + (z2 ? CONFIG.zone2.reachBonus : 0),
     offlineCap: has(s, 's3') ? g.s3Offline : CONFIG.offlineCapSeconds,
   };
 }
@@ -147,7 +190,7 @@ export const reach = (s: GameState): number => mods(s).reach;
 export const growthSpeed = (s: GameState): number => CONFIG.growth.speed * mods(s).growthSpeed;
 
 export function sugarUnlocked(s: GameState): boolean {
-  return s.nodes.some((n) => n.connected && n.type === 'baum');
+  return s.nodes.some((n) => n.connected && isTree(n));
 }
 
 /** Totholz: Abbau des Vorrats pro Sekunde. */
@@ -161,6 +204,7 @@ export function totholzRate(s: GameState, node: MapNode, m: Mods = mods(s)): num
 export function nodeYield(s: GameState, node: MapNode, m: Mods = mods(s)): number {
   if (node.type === 'laub') return CONFIG.nodes.laub.nps * distanceBonus(node) * m.decomp * m.laub * m.global;
   if (node.type === 'totholz') return node.stock > 0 ? totholzRate(s, node, m) * m.stock * m.global : 0;
+  if (node.type === 'rivale') return CONFIG.rivals.coreNps * distanceBonus(node) * m.global;
   return 0;
 }
 
@@ -174,6 +218,7 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
     if (!node.connected) continue;
     switch (node.type) {
       case 'laub':
+      case 'rivale':
         n += nodeYield(s, node, m);
         break;
       case 'totholz':
@@ -183,7 +228,8 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
         waterIn += CONFIG.nodes.feucht.water * distanceBonus(node) * m.water * drought;
         break;
       case 'baum':
-        treeDemand += CONFIG.nodes.baum.waterUse;
+      case 'altbaum':
+        treeDemand += CONFIG.nodes[node.type].waterUse;
         break;
       default:
         break;
@@ -192,7 +238,7 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
   const available = s.res.water / dt + waterIn;
   const treeSupply = treeDemand === 0 ? 0 : Math.min(1, available / treeDemand);
   for (const node of s.nodes) {
-    if (node.connected && node.type === 'baum') sugar += CONFIG.nodes.baum.sugar * distanceBonus(node) * treeSupply * m.sugar;
+    if (node.connected && isTree(node)) sugar += CONFIG.nodes[node.type as 'baum' | 'altbaum'].sugar * distanceBonus(node) * treeSupply * m.sugar;
   }
   n += CONFIG.effects.fruchtNps * s.levels.frucht * m.global;
   return { n, sugar, waterIn, waterUse: treeDemand * treeSupply, treeSupply };
@@ -215,6 +261,9 @@ export function tick(s: GameState, dt: number, offline = false): void {
   s.stats.playSeconds += dt;
   s.meta.lifetime.playSeconds += dt;
   updateEvents(s, offline);
+  updateRivals(s, offline);
+  const se = season(s);
+  if (se) s.meta.lifetime.seasons |= 1 << CONFIG.seasons.order.indexOf(se);
 }
 
 function addNutrients(s: GameState, amount: number): void {
@@ -229,11 +278,104 @@ function advanceGrowth(s: GameState, units: number): void {
   g.progress += units;
   if (g.progress >= g.length) {
     const target = s.nodes[g.to];
-    if (target) target.connected = true;
-    s.edges.push({ from: g.from, to: g.to });
     s.growth = null;
-    if (s.stats.zoneDoneAt === null && connectedCount(s) >= CONFIG.zoneGoal) s.stats.zoneDoneAt = s.stats.playSeconds;
+    if (!target) return;
+    if (target.type === 'rivale') defeatRival(s, target.owner - 1);
+    else if (target.owner > 0) releaseNode(s, target);
+    target.connected = true;
+    s.edges.push({ from: g.from, to: g.to });
+    const c = connectedCount(s);
+    if (s.stats.zoneDoneAt === null && c >= CONFIG.zoneGoal) s.stats.zoneDoneAt = s.stats.playSeconds;
+    if (s.zone < 2 && c >= CONFIG.zone2.unlockAt) {
+      s.zone = 2;
+      s.zone2Since = s.stats.playSeconds;
+      for (const r of s.rivals) r.nextAt = s.stats.playSeconds + CONFIG.rivals.interval * 2;
+    }
+    if (s.stats.zone2DoneAt === null && c >= CONFIG.zone2.goal) s.stats.zone2DoneAt = s.stats.playSeconds;
   }
+}
+
+// ---------- Konkurrenzpilze ----------
+
+function initRivals(s: GameState): void {
+  s.rivals = [];
+  for (const n of s.nodes) {
+    if (n.type !== 'rivale') continue;
+    n.owner = s.rivals.length + 1;
+    s.rivals.push({ core: n.id, edges: [], nextAt: 0, alive: true });
+  }
+}
+
+/**
+ * Rivale verliert einen Knoten. Alles, was dahinter hing und nun nicht mehr mit seinem Kern
+ * verbunden ist, wird ebenfalls frei – wer eine Leitung kappt, befreit den ganzen Ast.
+ */
+function releaseNode(s: GameState, node: MapNode): void {
+  const index = node.owner - 1;
+  const r = s.rivals[index];
+  node.owner = 0;
+  if (!r) return;
+  r.edges = r.edges.filter((e) => e.from !== node.id && e.to !== node.id);
+  const reached = new Set<number>([r.core]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const e of r.edges) {
+      if (reached.has(e.from) && !reached.has(e.to)) {
+        reached.add(e.to);
+        grew = true;
+      }
+    }
+  }
+  r.edges = r.edges.filter((e) => reached.has(e.from) && reached.has(e.to));
+  for (const n of s.nodes) if (n.owner === index + 1 && !reached.has(n.id)) n.owner = 0;
+}
+
+function defeatRival(s: GameState, index: number): void {
+  const r = s.rivals[index];
+  if (!r || !r.alive) return;
+  r.alive = false;
+  r.edges = [];
+  for (const n of s.nodes) if (n.owner === index + 1) n.owner = 0;
+  const reward = computeRates(s).n * CONFIG.rivals.defeatRewardSeconds;
+  addNutrients(s, Math.max(reward, 100));
+  s.meta.lifetime.rivalsBeaten++;
+}
+
+/** Ein Rivale besetzt den nächstgelegenen freien Knoten in Reichweite seines Netzes. */
+export function rivalStep(s: GameState, index: number): MapNode | null {
+  const r = s.rivals[index];
+  if (!r || !r.alive) return null;
+  const owned = s.nodes.filter((n) => n.owner === index + 1);
+  let best: MapNode | null = null;
+  let bestFrom: MapNode | null = null;
+  let bestD = Infinity;
+  for (const n of s.nodes) {
+    if (n.zone !== 2 || n.connected || n.owner !== 0 || n.type === 'stein' || n.type === 'rivale') continue;
+    if (s.growth?.to === n.id) continue;
+    for (const o of owned) {
+      const d = Math.hypot(o.x - n.x, o.y - n.y);
+      if (d <= CONFIG.rivals.reach && d < bestD && pathClear(s, o, n)) {
+        best = n;
+        bestFrom = o;
+        bestD = d;
+      }
+    }
+  }
+  if (!best || !bestFrom) return null;
+  best.owner = index + 1;
+  r.edges.push({ from: bestFrom.id, to: best.id });
+  return best;
+}
+
+function updateRivals(s: GameState, offline: boolean): void {
+  if (s.zone < 2) return;
+  const now = s.stats.playSeconds;
+  s.rivals.forEach((r, i) => {
+    if (!r.alive || now < r.nextAt) return;
+    r.nextAt = now + (offline ? CONFIG.rivals.offlineInterval : CONFIG.rivals.interval);
+    rivalStep(s, i);
+  });
 }
 
 /** Simuliert eine längere Zeitspanne in festen Schritten (z. B. Offline-Ertrag). */
@@ -318,7 +460,8 @@ export function pathClear(s: GameState, a: MapNode, b: MapNode): boolean {
 
 export function findSource(s: GameState, targetId: number): MapNode | null {
   const target = s.nodes[targetId];
-  if (!target || target.connected || target.type === 'stein') return null;
+  if (!target || target.connected || target.type === 'stein' || target.zone > s.zone) return null;
+  if (target.type === 'rivale' && !s.rivals[target.owner - 1]?.alive) return null;
   const maxReach = reach(s);
   let best: MapNode | null = null;
   let bestD = Infinity;
@@ -333,9 +476,14 @@ export function findSource(s: GameState, targetId: number): MapNode | null {
   return best;
 }
 
-export function growthCost(s: GameState, length: number): number {
+/** Kosten eines Fadens; besetzte Knoten und Rivalen-Kerne kosten ein Vielfaches. */
+export function growthCost(s: GameState, length: number, target?: MapNode): number {
   const g = CONFIG.growth;
-  return g.costPerUnit * length * g.costPerNode ** connectedCount(s) * mods(s).growthCost;
+  const n = connectedCount(s);
+  const u = CONFIG.zone2.unlockAt;
+  const scale = n <= u ? g.costPerNode ** n : g.costPerNode ** u * CONFIG.zone2.costPerNode ** (n - u);
+  const extra = !target ? 1 : target.type === 'rivale' ? CONFIG.rivals.coreCost : target.owner > 0 ? CONFIG.rivals.reclaimCost : 1;
+  return g.costPerUnit * length * scale * mods(s).growthCost * extra;
 }
 
 export type GrowResult = { ok: true } | { ok: false; reason: 'busy' | 'unreachable' | 'cost' };
@@ -345,7 +493,7 @@ export function growthQuote(s: GameState, targetId: number): { source: MapNode; 
   const source = findSource(s, targetId);
   if (!target || !source) return null;
   const length = Math.hypot(source.x - target.x, source.y - target.y);
-  return { source, length, cost: growthCost(s, length) };
+  return { source, length, cost: growthCost(s, length, target) };
 }
 
 export function startGrowth(s: GameState, targetId: number): GrowResult {

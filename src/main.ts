@@ -9,6 +9,8 @@ import {
   mods,
   nodeYield,
   prestige,
+  season,
+  seasonLeft,
   sporeGain,
   canBuy,
   buy,
@@ -116,7 +118,10 @@ function nodeDetails(id: number): string {
     case 'feucht':
       return t('yield_water', { v: fmt(CONFIG.nodes.feucht.water * b * m.water) });
     case 'baum':
-      return t('yield_sugar', { v: fmt(CONFIG.nodes.baum.sugar * b * m.sugar), w: fmt(CONFIG.nodes.baum.waterUse) });
+    case 'altbaum':
+      return t('yield_sugar', { v: fmt(CONFIG.nodes[n.type].sugar * b * m.sugar), w: fmt(CONFIG.nodes[n.type].waterUse) });
+    case 'rivale':
+      return n.connected ? t('yield_n', { v: fmt(nodeYield(state, n, m)) }) : '';
     default:
       return '';
   }
@@ -137,7 +142,9 @@ function renderCard(): void {
     cardEl.innerHTML = `<div class="card-head"><span class="dot"></span><strong></strong><button class="x" aria-label="${t('close')}">×</button></div><div class="card-desc"></div><div class="card-yield"></div><button class="grow"></button><div class="card-why"></div>`;
     cardEl.querySelector<HTMLElement>('.dot')!.style.background = NODE_COLORS[n.type];
     cardEl.querySelector('strong')!.textContent = t(`node_${n.type}` as TextKey);
-    cardEl.querySelector('.card-desc')!.textContent = t(`desc_${n.type}` as TextKey);
+    const descKey: TextKey =
+      n.type === 'rivale' && n.connected ? 'desc_rivale_beaten' : n.owner > 0 && n.type !== 'rivale' ? 'desc_owned' : (`desc_${n.type}` as TextKey);
+    cardEl.querySelector('.card-desc')!.textContent = t(descKey);
     cardEl.querySelector('.x')!.addEventListener('click', () => {
       renderer.selected = null;
       renderCard();
@@ -171,7 +178,8 @@ function renderCard(): void {
     why.textContent = t('grow_unreachable');
     return;
   }
-  btn.textContent = t('grow_btn', { cost: `${fmt(q.cost)} N` });
+  const btnKey: TextKey = n.type === 'rivale' ? 'attack_btn' : n.owner > 0 ? 'reclaim_btn' : 'grow_btn';
+  btn.textContent = t(btnKey, { cost: `${fmt(q.cost)} N` });
   if (state.growth) {
     btn.disabled = true;
     why.textContent = t('grow_busy');
@@ -207,7 +215,13 @@ function updateUi(force = false): void {
   const waterOn = state.nodes.some((n) => n.connected && n.type === 'feucht');
   $('#res-water').hidden = !waterOn;
   $('#res-water .v').textContent = fmt(state.res.water);
-  $('#net').textContent = t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
+  $('#net').textContent =
+    state.zone >= 2
+      ? t('net_progress_z2', { c: connectedCount(state), goal: CONFIG.zone2.goal })
+      : t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
+  const se = season(state);
+  $('#season').hidden = !se;
+  if (se) $('#season').textContent = `${t(`season_${se}` as TextKey)} · ${formatDuration(Math.ceil(seasonLeft(state)))}`;
   $('#res-spores').hidden = state.meta.sporesTotal === 0;
   $('#res-spores .v').textContent = fmt(state.meta.spores);
   updateTabs();
@@ -234,13 +248,31 @@ function updateUi(force = false): void {
   renderCard();
   if (force) renderer.draw(state, 0, performance.now() / 1000);
 
-  if (state.stats.zoneDoneAt !== null && !zoneShown) {
+  if (state.zone >= 2 && !zone2Shown) {
+    zone2Shown = true;
+    zoneShown = true;
+    renderer.startCelebration();
+    showMessage(t('zone2_title'), t('zone2_body'));
+  } else if (state.stats.zoneDoneAt !== null && !zoneShown) {
     zoneShown = true;
     renderer.startCelebration();
     showMessage(t('zone_title'), t('zone_body', { c: connectedCount(state), t: formatDuration(state.stats.zoneDoneAt) }));
   }
+  if (state.stats.zone2DoneAt !== null && !zone2DoneShown) {
+    zone2DoneShown = true;
+    renderer.startCelebration();
+    showMessage(t('zone2_done_title'), t('zone2_done_body', { c: connectedCount(state) }));
+  }
 }
 let zoneShown = false;
+let zone2Shown = false;
+let zone2DoneShown = false;
+/** Nach Laden, Import, Neustart oder Sporenflug: welche Meldungen sind schon „gesehen“? */
+function syncShown(): void {
+  zoneShown = state.stats.zoneDoneAt !== null || state.zone >= 2;
+  zone2Shown = state.zone >= 2;
+  zone2DoneShown = state.stats.zone2DoneAt !== null;
+}
 
 // ---------- Tabs: Wachstum · Genom · Erfolge ----------
 
@@ -349,7 +381,7 @@ function confirmPrestige(): void {
       state = next;
       renderer.selected = null;
       renderer.reset();
-      zoneShown = false;
+      syncShown();
       checkAchievements(state);
       save();
       setTab('genome');
@@ -512,7 +544,7 @@ function showSettings(): void {
     box.append(el('h2', t('settings')));
     box.append(el('h3', t('help')), el('p', t('help_body')));
     const legend = el('div', '', 'legend');
-    for (const type of ['laub', 'totholz', 'feucht', 'baum', 'stein'] as const) {
+    for (const type of ['laub', 'totholz', 'feucht', 'baum', 'stein', 'altbaum', 'rivale'] as const) {
       const item = el('span', '', 'legend-item');
       const dot = el('i', '', type === 'stein' ? 'hex' : '');
       dot.style.background = NODE_COLORS[type];
@@ -571,7 +603,7 @@ function showSettings(): void {
         state = r.state;
         renderer.selected = null;
         renderer.reset();
-        zoneShown = state.stats.zoneDoneAt !== null;
+        syncShown();
         save();
         closeModal();
         updateUi(true);
@@ -593,7 +625,7 @@ function showSettings(): void {
       state = newGame();
       renderer.selected = null;
       renderer.reset();
-      zoneShown = false;
+      syncShown();
       save();
       closeModal();
       updateUi(true);
@@ -669,7 +701,7 @@ setTab('grow');
 checkAchievements(state);
 renderer.reducedMotion = prefs.reducedMotion;
 renderer.resize();
-zoneShown = state.stats.zoneDoneAt !== null;
+syncShown();
 updateUi(true);
 if (booted.welcome) {
   showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(booted.welcome.seconds), v: fmt(booted.welcome.gained) }));

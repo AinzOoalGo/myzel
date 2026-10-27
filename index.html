@@ -48,6 +48,8 @@
         background: rgba(29,25,20,.9); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px;
         font-size: 13px; color: var(--ink); pointer-events: none; text-align: center; }
 
+      #season { position: absolute; left: 10px; bottom: 10px; background: rgba(29,25,20,.85); border: 1px solid var(--line);
+        border-radius: 999px; padding: 6px 12px; font-size: 12px; color: var(--quiet); pointer-events: none; }
       #btn-center { position: absolute; right: 10px; bottom: 10px; background: rgba(29,25,20,.9); color: var(--ink);
         border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
       #sheet { background: var(--panel); border-top: 1px solid var(--line); height: 38vh; min-height: 220px; overflow-y: auto;
@@ -67,7 +69,7 @@
       .ach { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); opacity: .5; }
       .ach.done { opacity: 1; }
       .ach-mark { width: 22px; text-align: center; color: var(--accent); font-weight: 700; }
-      #toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: #2b251d; color: var(--ink);
+      #toast { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); background: #2b251d; color: var(--ink);
         border: 1px solid var(--accent); border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 600;
         pointer-events: none; white-space: nowrap; z-index: 3; }
       #toast.show { animation: toast 2.6s ease both; }
@@ -139,6 +141,7 @@
       <main>
         <canvas id="cv"></canvas>
         <div id="hint" hidden></div>
+        <div id="season" hidden></div>
         <button id="btn-center" hidden>⌖ Zentrieren</button>
         <div id="toast" hidden></div>
       </main>

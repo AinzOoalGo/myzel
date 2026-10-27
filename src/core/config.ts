@@ -4,7 +4,8 @@
  * Die Balancing-Simulation (scripts/simulate.ts) liest dieselben Werte.
  */
 
-export type NodeType = 'spore' | 'laub' | 'totholz' | 'feucht' | 'baum' | 'stein';
+export type NodeType = 'spore' | 'laub' | 'totholz' | 'feucht' | 'baum' | 'stein' | 'altbaum' | 'rivale';
+export type Season = 'fruehling' | 'sommer' | 'herbst' | 'winter';
 export type UpgradeId = 'hyphen' | 'enzym' | 'frucht' | 'rhizo';
 export type GenomeId = 'z1' | 'z2' | 'z3' | 'z4' | 's1' | 's2' | 's3' | 's4' | 'p1' | 'p2' | 'p3' | 'p4';
 export type Branch = 'zersetzer' | 'symbiont' | 'pionier';
@@ -34,9 +35,46 @@ export const CONFIG = {
     minSpacing: 50,
     rockFreeRadius: 110,
     /** Typ-Gewichte für zufällige Knoten außerhalb des Startbereichs. */
-    weights: { laub: 40, totholz: 20, feucht: 11, baum: 13, stein: 16 } as Record<Exclude<NodeType, 'spore'>, number>,
+    weights: { laub: 40, totholz: 20, feucht: 11, baum: 13, stein: 16 } as Record<'laub' | 'totholz' | 'feucht' | 'baum' | 'stein', number>,
     /** Knotenradien in Welteinheiten (Darstellung + Kollision). */
-    radius_by_type: { spore: 14, laub: 9, totholz: 13, feucht: 11, baum: 16, stein: 18 } as Record<NodeType, number>,
+    radius_by_type: { spore: 14, laub: 9, totholz: 13, feucht: 11, baum: 16, stein: 18, altbaum: 30, rivale: 32 } as Record<NodeType, number>,
+  },
+
+  /** Zone 2 „Wald“: ein Ring um Zone 1, größerer Maßstab. Wird an die Karte angehängt, Zone-1-Knoten bleiben unverändert. */
+  zone2: {
+    unlockAt: 25, // verbundene Knoten
+    goal: 60,
+    innerRadius: 950,
+    outerRadius: 2600,
+    nodeCount: 230,
+    minSpacing: 150,
+    sizeScale: 2, // Knoten sind größer
+    weights: { laub: 34, totholz: 20, feucht: 12, baum: 12, altbaum: 6, stein: 16 } as Record<'laub' | 'totholz' | 'feucht' | 'baum' | 'altbaum' | 'stein', number>,
+    rivals: 3,
+    rivalMinDist: 1500,
+    reachBonus: 170,
+    speedBonus: 2,
+    /** Kostenanstieg je Knoten jenseits von unlockAt (statt costPerNode) */
+    costPerNode: 1.12,
+  },
+
+  rivals: {
+    interval: 75, // Sekunden zwischen zwei Eroberungen eines Rivalen
+    offlineInterval: 150,
+    reach: 260,
+    reclaimCost: 2.5, // Zurückerobern kostet ×2,5
+    coreCost: 4, // Kern angreifen kostet ×4
+    defeatRewardSeconds: 300, // Belohnung: 5 Min. Produktion
+    coreNps: 3,
+  },
+
+  seasons: {
+    length: 240, // Sekunden je Jahreszeit (nur ab Zone 2)
+    order: ['fruehling', 'sommer', 'herbst', 'winter'] as Season[],
+    fruehling: { growth: 1.3 },
+    sommer: { sugar: 1.5, water: 0.8 },
+    herbst: { laub: 2 },
+    winter: { growth: 0.7, global: 0.85 },
   },
 
   /** Entfernungsbonus: Ertrag × (1 + Distanz / distanceScale). Weiter draußen = reicher. */
@@ -60,6 +98,7 @@ export const CONFIG = {
     totholz: { nps: 2.5, stockBase: 120, stockPerDistance: 1.2 },
     feucht: { water: 0.35 },
     baum: { waterUse: 0.2, sugar: 0.25 },
+    altbaum: { waterUse: 0.5, sugar: 1.2 },
   },
 
   waterCap: 100,
