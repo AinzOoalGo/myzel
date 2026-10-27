@@ -1,0 +1,13 @@
+{
+  "name": "myzel",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Myzel – ein Incremental-Spiel über ein wachsendes Pilzgeflecht",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "bun test",
+    "build": "bun scripts/build.ts",
+    "simulate": "bun scripts/simulate.ts",
+    "check": "tsc --noEmit -p . && bun test && bun scripts/simulate.ts && bun scripts/build.ts"
+  }
+}

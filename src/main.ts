@@ -1,0 +1,422 @@
+import { CONFIG, type UpgradeId } from './core/config';
+import {
+  canBuy,
+  buy,
+  computeRates,
+  connectedCount,
+  distanceBonus,
+  growthQuote,
+  newGame,
+  startGrowth,
+  sugarUnlocked,
+  tap,
+  tick,
+  totholzRate,
+  upgradeCost,
+  type GameState,
+} from './core/game';
+import { formatDuration, formatNumber } from './core/format';
+import { applyOffline, deserialize, exportString, importString, serialize } from './core/save';
+import { t } from './i18n';
+import type { TextKey } from './i18n/de';
+import { NODE_COLORS, Renderer } from './ui/render';
+import { clearSave, loadPrefs, loadRaw, saveRaw, savePrefs } from './ui/storage';
+
+const $ = <T extends HTMLElement>(sel: string): T => {
+  const el = document.querySelector<T>(sel);
+  if (!el) throw new Error(`Element fehlt: ${sel}`);
+  return el;
+};
+const fmt = formatNumber;
+
+// ---------- Zustand laden ----------
+
+let storageOk = true;
+const prefs = loadPrefs();
+
+/** Lädt den Spielstand (inkl. Offline-Ertrag) oder startet ein neues Spiel. */
+function boot(): { state: GameState; welcome: { seconds: number; gained: number } | null } {
+  const raw = loadRaw();
+  if (raw) {
+    try {
+      const loaded = deserialize(raw);
+      const savedAt = (raw as { savedAt?: number }).savedAt ?? Date.now();
+      const off = applyOffline(loaded, savedAt, Date.now());
+      return { state: loaded, welcome: off.seconds > 60 && off.gained > 0 ? off : null };
+    } catch (err) {
+      console.warn('Spielstand konnte nicht geladen werden, starte neu.', err);
+    }
+  }
+  return { state: newGame(), welcome: null };
+}
+
+const booted = boot();
+let state: GameState = booted.state;
+
+function save(): void {
+  storageOk = saveRaw(serialize(state, Date.now()));
+}
+
+// ---------- DOM ----------
+
+const canvas = $<HTMLCanvasElement>('#cv');
+const renderer = new Renderer(canvas);
+const hintEl = $('#hint');
+const cardEl = $('#card');
+const upgradesEl = $('#upgrades');
+const lockedEl = $('#locked');
+const modalEl = $('#modal');
+const modalBox = $('#modal .box');
+
+const UPGRADE_IDS: UpgradeId[] = ['hyphen', 'enzym', 'frucht', 'rhizo'];
+const upgradeRows = new Map<UpgradeId, { row: HTMLElement; level: HTMLElement; btn: HTMLButtonElement }>();
+
+function buildUpgrades(): void {
+  $('#sheet-title').textContent = t('upgrades');
+  for (const id of UPGRADE_IDS) {
+    const row = document.createElement('div');
+    row.className = 'up';
+    row.innerHTML = `<div class="up-text"><div class="up-name"><span></span> <small></small></div><div class="up-desc"></div></div><button class="buy"></button>`;
+    row.querySelector('.up-name span')!.textContent = t(`up_${id}` as TextKey);
+    row.querySelector('.up-desc')!.textContent = t(`up_${id}_desc` as TextKey);
+    const btn = row.querySelector<HTMLButtonElement>('button')!;
+    btn.addEventListener('click', () => {
+      if (buy(state, id)) {
+        haptic(15);
+        updateUi(true);
+      }
+    });
+    upgradesEl.appendChild(row);
+    upgradeRows.set(id, { row, level: row.querySelector('small')!, btn });
+  }
+}
+
+function costLabel(c: { n: number; sugar: number }): string {
+  return c.sugar > 0 ? `${fmt(c.n)} N · ${fmt(c.sugar)} Z` : `${fmt(c.n)} N`;
+}
+
+function nodeDetails(id: number): string {
+  const n = state.nodes[id]!;
+  const b = distanceBonus(n);
+  switch (n.type) {
+    case 'laub':
+      return t('yield_n', { v: fmt(CONFIG.nodes.laub.nps * b * (1 + CONFIG.effects.enzymDecomp * state.levels.enzym)) });
+    case 'totholz':
+      if (n.connected && n.stock <= 0) return t('depleted');
+      return `${t('yield_n', { v: fmt(totholzRate(state, n)) })} · ${t('stock', { v: fmt(n.stock) })}`;
+    case 'feucht':
+      return t('yield_water', { v: fmt(CONFIG.nodes.feucht.water * b) });
+    case 'baum':
+      return t('yield_sugar', { v: fmt(CONFIG.nodes.baum.sugar * b), w: fmt(CONFIG.nodes.baum.waterUse) });
+    default:
+      return '';
+  }
+}
+
+let cardFor: number | null = null;
+function renderCard(): void {
+  const id = renderer.selected;
+  if (id === null) {
+    cardEl.hidden = true;
+    cardFor = null;
+    return;
+  }
+  const n = state.nodes[id]!;
+  if (cardFor !== id) {
+    cardFor = id;
+    cardEl.hidden = false;
+    cardEl.innerHTML = `<div class="card-head"><span class="dot"></span><strong></strong><button class="x" aria-label="${t('close')}">×</button></div><div class="card-desc"></div><div class="card-yield"></div><button class="grow"></button><div class="card-why"></div>`;
+    cardEl.querySelector<HTMLElement>('.dot')!.style.background = NODE_COLORS[n.type];
+    cardEl.querySelector('strong')!.textContent = t(`node_${n.type}` as TextKey);
+    cardEl.querySelector('.card-desc')!.textContent = t(`desc_${n.type}` as TextKey);
+    cardEl.querySelector('.x')!.addEventListener('click', () => {
+      renderer.selected = null;
+      renderCard();
+    });
+    cardEl.querySelector('.grow')!.addEventListener('click', () => {
+      const r = startGrowth(state, id);
+      if (r.ok) {
+        haptic(20);
+        renderer.selected = null;
+        renderCard();
+        updateUi(true);
+      }
+    });
+  }
+  cardEl.querySelector('.card-yield')!.textContent = n.connected ? `${t('connected')} · ${nodeDetails(id)}` : nodeDetails(id);
+  const btn = cardEl.querySelector<HTMLButtonElement>('.grow')!;
+  const why = cardEl.querySelector<HTMLElement>('.card-why')!;
+  if (n.connected || n.type === 'spore') {
+    btn.hidden = true;
+    why.textContent = '';
+    return;
+  }
+  if (n.type === 'stein') {
+    btn.hidden = true;
+    why.textContent = t('grow_rock');
+    return;
+  }
+  const q = growthQuote(state, id);
+  btn.hidden = !q;
+  if (!q) {
+    why.textContent = t('grow_unreachable');
+    return;
+  }
+  btn.textContent = t('grow_btn', { cost: `${fmt(q.cost)} N` });
+  if (state.growth) {
+    btn.disabled = true;
+    why.textContent = t('grow_busy');
+  } else if (state.res.n < q.cost) {
+    btn.disabled = true;
+    why.textContent = t('grow_cost', { missing: fmt(q.cost - state.res.n) });
+  } else {
+    btn.disabled = false;
+    why.textContent = '';
+  }
+}
+
+function hint(): string {
+  const c = connectedCount(state);
+  if (state.growth) return t('hint_growing');
+  if (c === 0) return state.res.n < 20 ? t('hint_start') : t('hint_select');
+  const rates = computeRates(state);
+  if (sugarUnlocked(state) && rates.treeSupply < 1 && state.res.water < 1) return t('hint_water');
+  return '';
+}
+
+function updateUi(force = false): void {
+  const rates = computeRates(state);
+  $('#res-n .v').textContent = fmt(state.res.n);
+  $('#res-n .r').textContent = t('per_sec', { v: fmt(rates.n) });
+  const sugarOn = sugarUnlocked(state);
+  $('#res-sugar').hidden = !sugarOn;
+  $('#res-sugar .v').textContent = fmt(state.res.sugar);
+  const waterOn = state.nodes.some((n) => n.connected && n.type === 'feucht');
+  $('#res-water').hidden = !waterOn;
+  $('#res-water .v').textContent = fmt(state.res.water);
+  $('#net').textContent = t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
+
+  for (const id of UPGRADE_IDS) {
+    const r = upgradeRows.get(id)!;
+    const def = CONFIG.upgrades.find((u) => u.id === id)!;
+    r.row.hidden = def.requiresSugar && !sugarOn;
+    r.level.textContent = t('level', { v: state.levels[id] });
+    r.btn.textContent = costLabel(upgradeCost(state, id));
+    r.btn.disabled = !canBuy(state, id);
+  }
+  lockedEl.hidden = sugarOn;
+  lockedEl.textContent = t('locked_sugar');
+  const h = hint();
+  hintEl.textContent = h;
+  hintEl.hidden = !h;
+  renderCard();
+  if (force) renderer.draw(state, 0, performance.now() / 1000);
+
+  if (state.stats.zoneDoneAt !== null && !zoneShown) {
+    zoneShown = true;
+    showMessage(t('zone_title'), t('zone_body', { c: connectedCount(state), t: formatDuration(state.stats.zoneDoneAt) }));
+  }
+}
+let zoneShown = false;
+
+// ---------- Eingabe ----------
+
+function haptic(ms: number): void {
+  if (prefs.vibration && 'vibrate' in navigator) {
+    try {
+      navigator.vibrate(ms);
+    } catch {
+      /* nicht unterstützt */
+    }
+  }
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const hit = renderer.hitTest(state, sx, sy);
+  if (hit && !hit.connected) {
+    renderer.selected = hit.id;
+    haptic(8);
+  } else {
+    const v = tap(state);
+    renderer.addFloat(sx, sy, t('float_n', { v: fmt(v) }));
+    haptic(6);
+    if (hit) renderer.selected = hit.type === 'spore' ? null : hit.id;
+  }
+  updateUi();
+});
+
+// ---------- Dialoge ----------
+
+function openModal(build: (box: HTMLElement) => void): void {
+  modalBox.innerHTML = '';
+  build(modalBox);
+  modalEl.hidden = false;
+}
+function closeModal(): void {
+  modalEl.hidden = true;
+}
+modalEl.addEventListener('click', (e) => {
+  if (e.target === modalEl) closeModal();
+});
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', cls = ''): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (text) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+
+function showMessage(title: string, body: string): void {
+  openModal((box) => {
+    box.append(el('h2', title), el('p', body));
+    const ok = el('button', t('ok'), 'primary');
+    ok.addEventListener('click', closeModal);
+    box.append(ok);
+  });
+}
+
+function showSettings(): void {
+  openModal((box) => {
+    box.append(el('h2', t('settings')));
+    box.append(el('h3', t('help')), el('p', t('help_body')));
+    const legend = el('div', '', 'legend');
+    for (const type of ['laub', 'totholz', 'feucht', 'baum', 'stein'] as const) {
+      const item = el('span', '', 'legend-item');
+      const dot = el('i', '', type === 'stein' ? 'hex' : '');
+      dot.style.background = NODE_COLORS[type];
+      item.append(dot, document.createTextNode(t(`node_${type}` as TextKey)));
+      legend.append(item);
+    }
+    box.append(el('h3', t('legend')), legend);
+
+    const vib = el('label', '', 'toggle');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = prefs.vibration;
+    cb.addEventListener('change', () => {
+      prefs.vibration = cb.checked;
+      savePrefs(prefs);
+    });
+    vib.append(cb, document.createTextNode(` ${t('vibration')}`));
+    box.append(vib);
+
+    if (!storageOk) box.append(el('p', t('storage_warning'), 'warn'));
+
+    box.append(el('h3', t('export')), el('p', t('export_hint'), 'small'));
+    const out = el('textarea');
+    out.readOnly = true;
+    out.value = exportString(state, Date.now());
+    const copy = el('button', t('copy'));
+    copy.addEventListener('click', async () => {
+      out.select();
+      try {
+        await navigator.clipboard.writeText(out.value);
+      } catch {
+        document.execCommand('copy');
+      }
+      copy.textContent = t('copied');
+    });
+    box.append(out, copy);
+
+    box.append(el('h3', t('import')));
+    const inp = el('textarea');
+    const err = el('p', '', 'warn');
+    const load = el('button', t('import_btn'));
+    load.addEventListener('click', () => {
+      try {
+        const r = importString(inp.value);
+        state = r.state;
+        renderer.selected = null;
+        zoneShown = state.stats.zoneDoneAt !== null;
+        save();
+        closeModal();
+        updateUi(true);
+      } catch {
+        err.textContent = t('import_error');
+      }
+    });
+    box.append(inp, load, err);
+
+    const reset = el('button', t('reset'), 'danger');
+    let armed = false;
+    reset.addEventListener('click', () => {
+      if (!armed) {
+        armed = true;
+        reset.textContent = t('reset_confirm');
+        return;
+      }
+      clearSave();
+      state = newGame();
+      renderer.selected = null;
+      zoneShown = false;
+      save();
+      closeModal();
+      updateUi(true);
+    });
+    const close = el('button', t('close'), 'primary');
+    close.addEventListener('click', closeModal);
+    box.append(el('hr'), reset, close, el('p', t('version'), 'small center'));
+  });
+}
+$('#btn-settings').addEventListener('click', showSettings);
+
+// ---------- Spielschleife ----------
+
+const DT = 1 / CONFIG.ticksPerSecond;
+let acc = 0;
+let last = performance.now();
+let uiAcc = 0;
+let saveAcc = 0;
+
+function frame(now: number): void {
+  let elapsed = (now - last) / 1000;
+  last = now;
+  if (elapsed > 5) {
+    // Tab war im Hintergrund: wie Offline-Zeit nachholen
+    const off = applyOffline(state, Date.now() - elapsed * 1000, Date.now());
+    if (off.seconds > 60 && off.gained > 0) showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(off.seconds), v: fmt(off.gained) }));
+    elapsed = 0;
+  }
+  acc += elapsed;
+  while (acc >= DT) {
+    tick(state, DT);
+    acc -= DT;
+  }
+  renderer.draw(state, elapsed, now / 1000);
+  uiAcc += elapsed;
+  if (uiAcc > 0.1) {
+    uiAcc = 0;
+    updateUi();
+  }
+  saveAcc += elapsed;
+  if (saveAcc > CONFIG.autosaveSeconds) {
+    saveAcc = 0;
+    save();
+  }
+  requestAnimationFrame(frame);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') save();
+});
+window.addEventListener('pagehide', save);
+// Größe neu messen, wenn sich die Fläche ändert (Fenster, Infokarte ein/aus, Drehen)
+new ResizeObserver(() => renderer.resize()).observe(canvas);
+
+$('#title').textContent = t('title');
+$('#res-n .l').textContent = t('res_n');
+$('#res-sugar .l').textContent = t('res_sugar');
+$('#res-water .l').textContent = t('res_water');
+buildUpgrades();
+renderer.resize();
+zoneShown = state.stats.zoneDoneAt !== null;
+updateUi(true);
+if (booted.welcome) {
+  showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(booted.welcome.seconds), v: fmt(booted.welcome.gained) }));
+}
+save();
+requestAnimationFrame(frame);
