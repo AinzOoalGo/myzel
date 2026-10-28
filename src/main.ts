@@ -199,7 +199,12 @@ function renderCard(): void {
     return;
   }
   const btnKey: TextKey = n.type === 'rivale' ? 'attack_btn' : n.owner > 0 ? 'reclaim_btn' : 'grow_btn';
-  btn.textContent = t(btnKey, { cost: `${fmt(q.cost)} N` });
+  // Aufbau „Wort · Kosten“; auf sehr kleinen Handys wird das Wort ausgeblendet, damit der Name Platz hat
+  const [word = '', cost = ''] = t(btnKey, { cost: `${fmt(q.cost)} N` }).split(' · ');
+  const lbl = document.createElement('span');
+  lbl.className = 'lbl';
+  lbl.textContent = `${word} · `;
+  btn.replaceChildren(lbl, document.createTextNode(cost));
   if (state.growth) {
     btn.disabled = true;
     why.textContent = t('grow_busy');

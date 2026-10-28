@@ -1,6 +1,6 @@
 {
   "name": "myzel",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Myzel – ein Incremental-Spiel über ein wachsendes Pilzgeflecht",
   "scripts": {
