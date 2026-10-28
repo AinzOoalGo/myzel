@@ -46,7 +46,9 @@ const fmt = formatNumber;
 let storageOk = true;
 const prefs = loadPrefs();
 /** Testmodus: Spieltempo (nur wenn CONFIG.testTools an ist) */
-const speed = (): number => (CONFIG.testTools && CONFIG.testSpeeds.includes(prefs.speed) ? prefs.speed : 1);
+/** Testwerkzeuge: in der Testversion immer, im Release nur im versteckten Entwicklermodus (7× auf die Version tippen). */
+const testTools = (): boolean => CONFIG.testTools || prefs.devMode;
+const speed = (): number => (testTools() && CONFIG.testSpeeds.includes(prefs.speed) ? prefs.speed : 1);
 
 /** Lädt den Spielstand (inkl. Offline-Ertrag) oder startet ein neues Spiel. */
 function boot(): { state: GameState; welcome: { seconds: number; gained: number } | null; restored: boolean } {
@@ -654,7 +656,7 @@ function showSettings(): void {
       }),
     );
 
-    if (CONFIG.testTools) {
+    if (testTools()) {
       box.append(el('h3', t('test_title')), el('p', t('test_hint'), 'small'));
       const row = el('div', '', 'speed-row');
       for (const v of CONFIG.testSpeeds) {
@@ -727,7 +729,24 @@ function showSettings(): void {
     });
     const close = el('button', t('close'), 'primary');
     close.addEventListener('click', closeModal);
-    box.append(el('hr'), reset, close, el('p', t('version'), 'small center'));
+    // Versteckter Entwicklermodus: 7× schnell auf die Versionsnummer tippen
+    const ver = el('p', t('version'), 'small center');
+    let taps = 0;
+    let lastTap = 0;
+    ver.addEventListener('click', () => {
+      const now = Date.now();
+      taps = now - lastTap < 1500 ? taps + 1 : 1;
+      lastTap = now;
+      if (taps < 7) return;
+      taps = 0;
+      prefs.devMode = !prefs.devMode;
+      if (!prefs.devMode) prefs.speed = 1;
+      savePrefs(prefs);
+      toast(t(prefs.devMode ? 'dev_on' : 'dev_off'));
+      showSettings();
+      updateUi();
+    });
+    box.append(el('hr'), reset, close, ver);
   });
 }
 $('#btn-settings').addEventListener('click', showSettings);

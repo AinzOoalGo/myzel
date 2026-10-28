@@ -49,14 +49,16 @@ export interface Prefs {
   speed: number;
   music: number; // 0..1
   sfx: number; // 0..1
+  /** versteckter Entwicklermodus (nur dieses Gerät) */
+  devMode: boolean;
 }
 
 export function loadPrefs(): Prefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs>;
-    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion(), speed: typeof p.speed === 'number' ? p.speed : 1, music: typeof p.music === 'number' ? p.music : 0.5, sfx: typeof p.sfx === 'number' ? p.sfx : 0.7 };
+    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion(), speed: typeof p.speed === 'number' ? p.speed : 1, music: typeof p.music === 'number' ? p.music : 0.5, sfx: typeof p.sfx === 'number' ? p.sfx : 0.7, devMode: p.devMode === true };
   } catch {
-    return { vibration: true, reducedMotion: systemReducedMotion(), speed: 1, music: 0.5, sfx: 0.7 };
+    return { vibration: true, reducedMotion: systemReducedMotion(), speed: 1, music: 0.5, sfx: 0.7, devMode: false };
   }
 }
 

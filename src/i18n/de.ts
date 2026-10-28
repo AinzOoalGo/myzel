@@ -1,7 +1,7 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Version 1.0',
+  version: 'Version 1.0.1',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
@@ -206,6 +206,8 @@ export const de = {
   test_title: 'Testmodus: Spieltempo',
   test_hint: 'Nur für Tests – verschwindet vor dem Release. Beschleunigt alles außer deinen Tipps.',
   test_badge: 'Test ×{v}',
+  dev_on: 'Entwicklermodus an – Tempo-Regler freigeschaltet',
+  dev_off: 'Entwicklermodus aus',
   center: 'Zentrieren',
   export: 'Spielstand exportieren',
   export_hint: 'Diesen Text sicher aufbewahren, um den Spielstand später wiederherzustellen.',
