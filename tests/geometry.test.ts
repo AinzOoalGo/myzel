@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { buildHypha, pointAt, subtreeWeights, wavyPath } from '../src/ui/geometry';
+import { buildHypha, pointAt, subtreeSums, subtreeWeights, wavyPath } from '../src/ui/geometry';
 
 describe('Faden-Geometrie', () => {
   it('beginnt und endet exakt an den Knoten', () => {
@@ -40,5 +40,22 @@ describe('Fadendicke nach Fluss', () => {
     expect(w.get(1)).toBe(3);
     expect(w.get(2)).toBe(1);
     expect(w.get(4)).toBe(1);
+  });
+});
+
+describe('Fluss durch einen Faden', () => {
+  it('ein leerer Knoten in der Mitte leitet den Fluss von dahinter weiter', () => {
+    // 0 → 1 (leeres Totholz) → 2 (Laub, liefert)
+    const edges = [
+      { from: 0, to: 1 },
+      { from: 1, to: 2 },
+    ];
+    const flow = subtreeSums(edges, (id) => (id === 2 ? 1 : 0));
+    expect(flow.get(1)).toBe(1); // Faden Basis → Totholz trägt den Laub-Fluss
+    expect(flow.get(2)).toBe(1);
+  });
+  it('ein toter Ast hat keinen Fluss', () => {
+    const flow = subtreeSums([{ from: 0, to: 1 }], () => 0);
+    expect(flow.get(1)).toBe(0);
   });
 });

@@ -96,6 +96,15 @@ export function buildHypha(from: { id: number; x: number; y: number }, to: { id:
  * Bestimmt die Fadendicke: Stränge nahe am Ursprung tragen mehr.
  */
 export function subtreeWeights(edges: Edge[]): Map<number, number> {
+  return subtreeSums(edges, () => 1);
+}
+
+/**
+ * Summe eines Knotenwerts über alles, was hinter einer Kante hängt (inkl. Zielknoten).
+ * Damit lässt sich zeigen, wie viel tatsächlich durch einen Faden fließt –
+ * auch wenn der Knoten direkt am Faden selbst nichts mehr liefert.
+ */
+export function subtreeSums(edges: Edge[], valueOf: (node: number) => number): Map<number, number> {
   const children = new Map<number, number[]>();
   for (const e of edges) {
     const list = children.get(e.from) ?? [];
@@ -106,7 +115,7 @@ export function subtreeWeights(edges: Edge[]): Map<number, number> {
   const weight = (node: number): number => {
     const cached = memo.get(node);
     if (cached !== undefined) return cached;
-    let w = 1;
+    let w = valueOf(node);
     // iterativ genug: das Netz ist ein Baum mit wenigen hundert Knoten
     for (const c of children.get(node) ?? []) w += weight(c);
     memo.set(node, w);

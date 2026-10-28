@@ -29,7 +29,7 @@ export interface SaveV3 {
   zone2Since: number | null;
   /** Knoten-ID → Rivale (nur besetzte) */
   owners: Record<string, number>;
-  rivals: { edges: [number, number][]; nextAt: number; alive: boolean }[];
+  rivals: { edges: [number, number][]; nextAt: number; alive: boolean; reach?: number }[];
 }
 
 type AnySave = { v: number } & Record<string, unknown>;
@@ -76,7 +76,7 @@ export function serialize(s: GameState, now: number): SaveV3 {
     zone: s.zone,
     zone2Since: s.zone2Since,
     owners: Object.fromEntries(s.nodes.filter((n) => n.owner > 0 && n.type !== 'rivale').map((n) => [n.id, n.owner])),
-    rivals: s.rivals.map((r) => ({ edges: r.edges.map((e) => [e.from, e.to] as [number, number]), nextAt: r.nextAt, alive: r.alive })),
+    rivals: s.rivals.map((r) => ({ edges: r.edges.map((e) => [e.from, e.to] as [number, number]), nextAt: r.nextAt, alive: r.alive, reach: r.reach })),
   };
 }
 
@@ -135,7 +135,13 @@ export function deserialize(raw: unknown): GameState {
   const rivals: Rival[] = base.rivals.map((r, i) => {
     const saved = d.rivals?.[i];
     if (!saved) return r;
-    return { core: r.core, edges: (saved.edges ?? []).map(([from, to]) => ({ from, to })), nextAt: num(saved.nextAt), alive: saved.alive !== false };
+    return {
+      core: r.core,
+      edges: (saved.edges ?? []).map(([from, to]) => ({ from, to })),
+      nextAt: num(saved.nextAt),
+      alive: saved.alive !== false,
+      reach: num(saved.reach, CONFIG.rivals.reach),
+    };
   });
   for (const [id, owner] of Object.entries(d.owners ?? {})) {
     const n = nodes[Number(id)];

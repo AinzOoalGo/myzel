@@ -128,6 +128,15 @@ describe('Konkurrenzpilze', () => {
     for (const n of owned) expect(n.zone).toBe(2);
     expect(s.rivals.reduce((c, r) => c + r.edges.length, 0)).toBe(owned.length);
   });
+  it('bleiben nicht stecken, sondern wachsen weiter', () => {
+    const s = newGame(1);
+    s.zone = 2;
+    s.zone2Since = 0;
+    for (const r of s.rivals) r.nextAt = 0;
+    simulate(s, 3 * 3600, 1);
+    // jeder Rivale hat sich deutlich ausgebreitet, keiner bleibt bei einer Handvoll Knoten stehen
+    for (const r of s.rivals) expect(r.edges.length).toBeGreaterThan(20);
+  });
   it('besetzen nie Knoten des Spielers oder sein aktuelles Ziel', () => {
     const s = newGame(1);
     s.zone = 2;

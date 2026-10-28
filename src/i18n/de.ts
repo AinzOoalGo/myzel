@@ -1,7 +1,7 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Version 1.0.1',
+  version: 'Version 1.0.2',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',

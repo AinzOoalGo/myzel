@@ -1,8 +1,8 @@
 import type { NodeType } from '../core/config';
-import { findSource, growthSpeed, reach, season, type GameState } from '../core/game';
+import { computeRates, findSource, growthSpeed, reach, season, type GameState } from '../core/game';
 import type { MapNode } from '../core/map';
 import { createRng } from '../core/rng';
-import { buildHypha, pointAt, subtreeWeights, type Hypha, type Path } from './geometry';
+import { buildHypha, pointAt, subtreeSums, subtreeWeights, type Hypha, type Path } from './geometry';
 
 /**
  * Darstellung „biolumineszenter Untergrund“ (Phase 3), Canvas 2D.
@@ -119,6 +119,8 @@ export class Renderer {
   private rivalHyphae = new Map<string, Hypha>();
   private visibleIds = new Set<number>();
   private weights = new Map<number, number>();
+  /** Wie viele liefernde Knoten hängen hinter jedem Faden? 0 = toter Ast */
+  private flows = new Map<number, number>();
   private growthPath: { key: string; hypha: Hypha } | null = null;
 
   private glowWarm = makeSprite('rgba(255,236,200,1)', 'rgba(255,170,90,0.35)');
@@ -267,7 +269,10 @@ export class Renderer {
 
   private refresh(s: GameState): void {
     const rivalKey = s.rivals.map((r) => `${r.alive ? 1 : 0}${r.edges.length}`).join(',');
-    const key = `${s.seed}|${s.zone}|${s.edges.length}|${s.levels.rhizo}|${s.growth ? s.growth.to : -1}|${rivalKey}|${s.meta.genome.length}`;
+    // leere Totholz-Knoten und Baumversorgung ändern den Fluss, also gehören sie in den Schlüssel
+    const empty = s.nodes.reduce((c, n) => c + (n.connected && n.type === 'totholz' && n.stock <= 0 ? 1 : 0), 0);
+    const trees = computeRates(s).treeSupply > 0 ? 1 : 0;
+    const key = `${s.seed}|${s.zone}|${s.edges.length}|${s.levels.rhizo}|${s.growth ? s.growth.to : -1}|${rivalKey}|${s.meta.genome.length}|${empty}|${trees}`;
     if (key === this.cacheKey) return;
     this.cacheKey = key;
     const r = reach(s);
@@ -303,6 +308,14 @@ export class Renderer {
       for (const k of this.hyphae.keys()) if (!keep.has(k)) this.hyphae.delete(k);
     }
     this.weights = subtreeWeights(s.edges);
+    const supplied = computeRates(s).treeSupply > 0;
+    this.flows = subtreeSums(s.edges, (id) => {
+      const n = s.nodes[id];
+      if (!n) return 0;
+      if (n.type === 'totholz') return n.stock > 0 ? 1 : 0;
+      if (n.type === 'baum' || n.type === 'altbaum') return supplied ? 1 : 0;
+      return n.type === 'stein' ? 0 : 1;
+    });
     if (s.growth) {
       const gk = `${s.growth.from}>${s.growth.to}`;
       if (this.growthPath?.key !== gk) this.growthPath = { key: gk, hypha: buildHypha(s.nodes[s.growth.from]!, s.nodes[s.growth.to]!) };
@@ -411,12 +424,12 @@ export class Renderer {
     ctx.lineJoin = 'round';
     const boost = 1 + this.energy * 0.7;
     this.strokeNetwork([...this.rivalHyphae.values()].map((h) => ({ h, width: 2.2 })), 1, px, true);
-    const mine: { h: Hypha; width: number }[] = [];
+    const mine: { h: Hypha; width: number; dim: boolean }[] = [];
     for (const e of s.edges) {
       const h = this.hyphae.get(`${e.from}>${e.to}`);
       if (!h) continue;
       const wgt = this.weights.get(e.to) ?? 1;
-      mine.push({ h, width: 1.6 + Math.log2(wgt) * 0.9 });
+      mine.push({ h, width: 1.6 + Math.log2(wgt) * 0.9, dim: (this.flows.get(e.to) ?? 0) === 0 });
     }
     this.strokeNetwork(mine, boost, px, false);
     if (s.growth && this.growthPath) {
@@ -443,9 +456,9 @@ export class Renderer {
         if (!h) continue;
         const total = h.main.total;
         if (total < 12 * px) continue;
-        const n = s.nodes[e.to]!;
-        const producing = n.type !== 'totholz' || n.stock > 0;
-        const count = producing ? 1 + Math.min(2, Math.floor((this.weights.get(e.to) ?? 1) / 4)) : 0;
+        // Pulse zeigen, was wirklich durch diesen Faden fließt – auch von Knoten weiter hinten
+        const flow = this.flows.get(e.to) ?? 0;
+        const count = flow > 0 ? 1 + Math.min(2, Math.floor(flow / 4)) : 0;
         for (let i = 0; i < count; i++) {
           const phase = (time * speed + (e.to * 37 + i * total) / (count || 1)) % total;
           const [x, y] = pointAt(h.main, total - phase);
@@ -645,7 +658,7 @@ export class Renderer {
    * Fertige Fäden gebündelt zeichnen: gleiche Dicken landen in einem Pfad,
    * so gibt es nur wenige Zeichenaufrufe statt drei pro Faden.
    */
-  private strokeNetwork(items: { h: Hypha; width: number }[], boost: number, px: number, rival: boolean): void {
+  private strokeNetwork(items: { h: Hypha; width: number; dim?: boolean }[], boost: number, px: number, rival: boolean): void {
     if (!items.length) return;
     const { ctx } = this;
     const glow = rival ? GLOW_RIVAL : GLOW_WARM;
@@ -653,9 +666,10 @@ export class Renderer {
     const buckets = new Map<number, Path2D>();
     const hairs = new Path2D();
     let anyHairs = false;
-    for (const { h, width } of items) {
+    for (const { h, width, dim } of items) {
       const w = Math.max(Math.round(width * 2) / 2, 1.2 * px);
-      const key = Math.round(w * 100);
+      // tote Äste (nichts fließt mehr) leuchten schwächer – eigener Topf
+      const key = Math.round(w * 100) * (dim ? -1 : 1);
       let b = buckets.get(key);
       if (!b) buckets.set(key, (b = new Path2D()));
       const c = this.paths(h);
@@ -666,16 +680,17 @@ export class Renderer {
       }
     }
     for (const [key, path] of buckets) {
-      const width = key / 100;
+      const width = Math.abs(key) / 100;
+      const b = key < 0 ? boost * 0.45 : boost;
       if (this.quality === 'high') {
-        ctx.strokeStyle = `${glow}${0.07 * boost})`;
+        ctx.strokeStyle = `${glow}${0.07 * b})`;
         ctx.lineWidth = width * 5 + 4 * px;
         ctx.stroke(path);
       }
-      ctx.strokeStyle = `${glow}${(this.quality === 'high' ? 0.16 : 0.24) * boost})`;
+      ctx.strokeStyle = `${glow}${(this.quality === 'high' ? 0.16 : 0.24) * b})`;
       ctx.lineWidth = width * 2.2;
       ctx.stroke(path);
-      ctx.strokeStyle = `${core}${Math.min(1, 0.75 * boost)})`;
+      ctx.strokeStyle = `${core}${Math.min(1, 0.75 * b)})`;
       ctx.lineWidth = Math.max(px, width * 0.8);
       ctx.stroke(path);
     }

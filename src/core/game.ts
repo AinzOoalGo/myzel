@@ -36,6 +36,8 @@ export interface Rival {
   edges: Edge[];
   nextAt: number; // Spielsekunden
   alive: boolean;
+  /** wächst, wenn er in Reichweite nichts mehr findet */
+  reach: number;
 }
 
 export interface ActiveEvent {
@@ -302,7 +304,7 @@ function initRivals(s: GameState): void {
   for (const n of s.nodes) {
     if (n.type !== 'rivale') continue;
     n.owner = s.rivals.length + 1;
-    s.rivals.push({ core: n.id, edges: [], nextAt: 0, alive: true });
+    s.rivals.push({ core: n.id, edges: [], nextAt: 0, alive: true, reach: CONFIG.rivals.reach });
   }
 }
 
@@ -355,7 +357,7 @@ export function rivalStep(s: GameState, index: number): MapNode | null {
     if (s.growth?.to === n.id) continue;
     for (const o of owned) {
       const d = Math.hypot(o.x - n.x, o.y - n.y);
-      if (d <= CONFIG.rivals.reach && d < bestD && pathClear(s, o, n)) {
+      if (d <= r.reach && d < bestD && pathClear(s, o, n)) {
         best = n;
         bestFrom = o;
         bestD = d;
@@ -374,7 +376,11 @@ function updateRivals(s: GameState, offline: boolean): void {
   s.rivals.forEach((r, i) => {
     if (!r.alive || now < r.nextAt) return;
     r.nextAt = now + (offline ? CONFIG.rivals.offlineInterval : CONFIG.rivals.interval);
-    rivalStep(s, i);
+    if (!rivalStep(s, i) && r.reach < CONFIG.rivals.maxReach) {
+      // nichts in Reichweite: weiter ausgreifen und bald erneut versuchen
+      r.reach = Math.min(CONFIG.rivals.maxReach, r.reach + CONFIG.rivals.reachStep);
+      r.nextAt = now + 15;
+    }
   });
 }
 

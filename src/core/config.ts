@@ -63,9 +63,11 @@ export const CONFIG = {
   },
 
   rivals: {
-    interval: 75, // Sekunden zwischen zwei Eroberungen eines Rivalen
-    offlineInterval: 150,
-    reach: 260,
+    interval: 120, // Sekunden zwischen zwei Eroberungen eines Rivalen
+    offlineInterval: 240,
+    reach: 260, // Startreichweite eines Rivalen
+    reachStep: 60, // findet er nichts, wächst seine Reichweite – er bleibt nie für immer stehen
+    maxReach: 700,
     reclaimCost: 2.5, // Zurückerobern kostet ×2,5
     coreCost: 4, // Kern angreifen kostet ×4
     defeatRewardSeconds: 300, // Belohnung: 5 Min. Produktion
