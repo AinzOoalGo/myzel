@@ -31,7 +31,8 @@ import { applyOffline, deserialize, exportString, importString, serialize } from
 import { t } from './i18n';
 import type { TextKey } from './i18n/de';
 import { NODE_COLORS, Renderer } from './ui/render';
-import { clearSave, loadPrefs, loadRaw, saveRaw, savePrefs } from './ui/storage';
+import { Audio } from './ui/audio';
+import { clearSave, loadBackup, loadPrefs, loadRaw, saveRaw, savePrefs } from './ui/storage';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -48,19 +49,23 @@ const prefs = loadPrefs();
 const speed = (): number => (CONFIG.testTools && CONFIG.testSpeeds.includes(prefs.speed) ? prefs.speed : 1);
 
 /** Lädt den Spielstand (inkl. Offline-Ertrag) oder startet ein neues Spiel. */
-function boot(): { state: GameState; welcome: { seconds: number; gained: number } | null } {
-  const raw = loadRaw();
-  if (raw) {
+function boot(): { state: GameState; welcome: { seconds: number; gained: number } | null; restored: boolean } {
+  // Erst der Hauptstand, bei Problemen die Sicherungskopie – erst dann ein neues Spiel
+  for (const [raw, restored] of [
+    [loadRaw(), false],
+    [loadBackup(), true],
+  ] as const) {
+    if (!raw) continue;
     try {
       const loaded = deserialize(raw);
       const savedAt = (raw as { savedAt?: number }).savedAt ?? Date.now();
       const off = applyOffline(loaded, savedAt, Date.now());
-      return { state: loaded, welcome: off.seconds > 60 && off.gained > 0 ? off : null };
+      return { state: loaded, welcome: off.seconds > 60 && off.gained > 0 ? off : null, restored };
     } catch (err) {
-      console.warn('Spielstand konnte nicht geladen werden, starte neu.', err);
+      console.warn('Spielstand konnte nicht geladen werden.', err);
     }
   }
-  return { state: newGame(), welcome: null };
+  return { state: newGame(), welcome: null, restored: false };
 }
 
 const booted = boot();
@@ -71,6 +76,13 @@ function save(): void {
 }
 
 // ---------- DOM ----------
+
+const audio = new Audio();
+audio.musicVolume = prefs.music;
+audio.sfxVolume = prefs.sfx;
+// Browser erlauben Ton erst nach einer Berührung/Klick
+document.addEventListener('pointerdown', () => audio.unlock(), { capture: true });
+document.addEventListener('keydown', () => audio.unlock(), { capture: true });
 
 const canvas = $<HTMLCanvasElement>('#cv');
 const renderer = new Renderer(canvas);
@@ -95,6 +107,8 @@ function buildUpgrades(): void {
     btn.addEventListener('click', () => {
       if (buy(state, id)) {
         haptic(15);
+        audio.play('buy');
+        pulse(row);
         updateUi(true);
       }
     });
@@ -155,6 +169,7 @@ function renderCard(): void {
       const r = startGrowth(state, id);
       if (r.ok) {
         haptic(20);
+        audio.play('grow');
         renderer.selected = null;
         renderCard();
         updateUi(true);
@@ -221,6 +236,10 @@ function updateUi(force = false): void {
     state.zone >= 2
       ? t('net_progress_z2', { c: connectedCount(state), goal: CONFIG.zone2.goal })
       : t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
+  const evA = state.events.active;
+  audio.setRain(!!evA && evA.type === 'regen' && evA.until > state.stats.playSeconds);
+  audio.setIntensity(connectedCount(state));
+  audio.setSeason(season(state));
   const sp = speed();
   $('#speed-badge').hidden = sp === 1;
   $('#speed-badge').textContent = t('test_badge', { v: sp });
@@ -233,6 +252,7 @@ function updateUi(force = false): void {
   if (activeTab === 'genome') updatePrestigeBox();
   for (const id of checkAchievements(state)) {
     toast(t('ach_toast', { name: t(`ach_${id}` as TextKey) }));
+    audio.play('achievement');
     if (activeTab === 'ach') buildAchievements();
   }
 
@@ -257,15 +277,18 @@ function updateUi(force = false): void {
     zone2Shown = true;
     zoneShown = true;
     renderer.startCelebration();
+    audio.play('fanfare');
     showMessage(t('zone2_title'), t('zone2_body'));
   } else if (state.stats.zoneDoneAt !== null && !zoneShown) {
     zoneShown = true;
     renderer.startCelebration();
+    audio.play('fanfare');
     showMessage(t('zone_title'), t('zone_body', { c: connectedCount(state), t: formatDuration(state.stats.zoneDoneAt) }));
   }
   if (state.stats.zone2DoneAt !== null && !zone2DoneShown) {
     zone2DoneShown = true;
     renderer.startCelebration();
+    audio.play('fanfare');
     showMessage(t('zone2_done_title'), t('zone2_done_body', { c: connectedCount(state) }));
   }
 }
@@ -346,6 +369,7 @@ function buildGenome(): void {
       b.addEventListener('click', () => {
         if (buyGenome(state, g.id as GenomeId)) {
           haptic(20);
+          audio.play('buy');
           save();
           buildGenome();
           updateUi(true);
@@ -383,6 +407,7 @@ function confirmPrestige(): void {
     go.addEventListener('click', () => {
       const next = prestige(state);
       if (!next) return closeModal();
+      audio.play('prestige');
       state = next;
       renderer.selected = null;
       renderer.reset();
@@ -428,6 +453,13 @@ function nextToast(): void {
 
 // ---------- Eingabe ----------
 
+/** kurzes Aufleuchten einer Zeile nach einem Kauf */
+function pulse(elm: HTMLElement): void {
+  elm.classList.remove('pulse');
+  void elm.offsetWidth;
+  elm.classList.add('pulse');
+}
+
 function haptic(ms: number): void {
   if (prefs.vibration && 'vibrate' in navigator) {
     try {
@@ -466,6 +498,7 @@ canvas.addEventListener('pointerdown', (e) => {
   const hit = renderer.hitTest(state, sx, sy);
   if (state.events.golden && renderer.hitGolden(state, sx, sy)) {
     const v = catchGolden(state);
+    audio.play('gold');
     renderer.tapFeedback(sx, sy, t('gold_float', { v: fmt(v) }));
     renderer.connectedBurstAt(sx, sy);
     haptic(40);
@@ -474,6 +507,7 @@ canvas.addEventListener('pointerdown', (e) => {
     haptic(8);
   } else {
     const v = tap(state);
+    audio.play('tap');
     renderer.tapFeedback(sx, sy, t('float_n', { v: fmt(v) }));
     haptic(6);
     if (hit) renderer.selected = hit.type === 'spore' ? null : hit.id;
@@ -513,6 +547,17 @@ canvas.addEventListener(
   { passive: false },
 );
 $('#btn-center').addEventListener('click', () => renderer.resetView());
+// Tastatur: Leertaste/Enter auf dem Spielfeld = Tippen (Barrierefreiheit, Desktop)
+canvas.addEventListener('keydown', (e) => {
+  if (e.key !== ' ' && e.key !== 'Enter') return;
+  e.preventDefault();
+  if (e.repeat) return;
+  const rect = canvas.getBoundingClientRect();
+  const v = tap(state);
+  audio.play('tap');
+  renderer.tapFeedback(rect.width / 2, rect.height / 2, t('float_n', { v: fmt(v) }));
+  updateUi();
+});
 
 // ---------- Dialoge ----------
 
@@ -579,6 +624,35 @@ function showSettings(): void {
     });
     rm.append(rmCb, document.createTextNode(` ${t('reduced_motion')}`));
     box.append(rm);
+
+    const slider = (label: string, value: number, onChange: (v: number) => void) => {
+      const wrap = el('label', '', 'slider');
+      const input = el('input');
+      input.type = 'range';
+      input.min = '0';
+      input.max = '100';
+      input.value = String(Math.round(value * 100));
+      input.setAttribute('aria-label', label);
+      input.addEventListener('input', () => onChange(Number(input.value) / 100));
+      wrap.append(el('span', label), input);
+      return wrap;
+    };
+    box.append(el('h3', t('sound')));
+    box.append(
+      slider(t('music'), prefs.music, (v) => {
+        prefs.music = v;
+        audio.musicVolume = v;
+        audio.applyVolumes();
+        savePrefs(prefs);
+      }),
+      slider(t('effects'), prefs.sfx, (v) => {
+        prefs.sfx = v;
+        audio.sfxVolume = v;
+        audio.applyVolumes();
+        savePrefs(prefs);
+        audio.play('tap');
+      }),
+    );
 
     if (CONFIG.testTools) {
       box.append(el('h3', t('test_title')), el('p', t('test_hint'), 'small'));
@@ -666,7 +740,20 @@ let last = performance.now();
 let uiAcc = 0;
 let saveAcc = 0;
 
+let frameErrors = 0;
 function frame(now: number): void {
+  try {
+    step(now);
+    frameErrors = 0;
+  } catch (err) {
+    // Ein Fehler in einem Bild darf das Spiel nicht anhalten; bei Dauerfehlern Stand sichern
+    console.error(err);
+    if (++frameErrors === 30) save();
+  }
+  requestAnimationFrame(frame);
+}
+
+function step(now: number): void {
   let elapsed = (now - last) / 1000;
   last = now;
   if (elapsed > 5) {
@@ -685,6 +772,7 @@ function frame(now: number): void {
   if (state.edges.length > edgesBefore) {
     renderer.connectedBurst(state, state.edges[state.edges.length - 1]!.to);
     haptic(25);
+    audio.play('connect');
   }
   renderer.draw(state, elapsed, now / 1000);
   uiAcc += elapsed;
@@ -697,17 +785,20 @@ function frame(now: number): void {
     saveAcc = 0;
     save();
   }
-  requestAnimationFrame(frame);
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') save();
+  if (document.visibilityState === 'hidden') {
+    save();
+    audio.suspend();
+  } else audio.resume();
 });
 window.addEventListener('pagehide', save);
 // Größe neu messen, wenn sich die Fläche ändert (Fenster, Infokarte ein/aus, Drehen)
 new ResizeObserver(() => renderer.resize()).observe(canvas);
 
 $('#title').textContent = t('title');
+canvas.setAttribute('aria-label', t('canvas_label'));
 $('#res-n .l').textContent = t('res_n');
 $('#btn-center').textContent = `⌖ ${t('center')}`;
 $('#res-sugar .l').textContent = t('res_sugar');
@@ -725,6 +816,7 @@ renderer.reducedMotion = prefs.reducedMotion;
 renderer.resize();
 syncShown();
 updateUi(true);
+if (booted.restored) toast(t('restored'));
 if (booted.welcome) {
   showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(booted.welcome.seconds), v: fmt(booted.welcome.gained) }));
 }

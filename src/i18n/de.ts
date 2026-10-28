@@ -1,7 +1,7 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Prototyp v0.5',
+  version: 'Prototyp v0.6',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
@@ -198,6 +198,11 @@ export const de = {
   legend: 'Legende',
   vibration: 'Vibration beim Tippen',
   reduced_motion: 'Weniger Bewegung und Partikel',
+  sound: 'Ton',
+  restored: 'Spielstand aus der Sicherungskopie wiederhergestellt',
+  canvas_label: 'Spielfeld: Tippen oder Leertaste für Nährstoffe',
+  music: 'Musik',
+  effects: 'Effekte',
   test_title: 'Testmodus: Spieltempo',
   test_hint: 'Nur für Tests – verschwindet vor dem Release. Beschleunigt alles außer deinen Tipps.',
   test_badge: 'Test ×{v}',

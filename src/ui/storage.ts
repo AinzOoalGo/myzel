@@ -2,17 +2,30 @@
 const KEY = 'myzel.save';
 const PREFS = 'myzel.prefs';
 
-export function loadRaw(): unknown {
+const BACKUP = 'myzel.save.bak';
+
+function read(key: string): unknown {
   try {
-    const s = localStorage.getItem(KEY);
+    const s = localStorage.getItem(key);
     return s ? JSON.parse(s) : null;
   } catch {
     return null;
   }
 }
 
+/** Hauptspielstand und die Sicherungskopie (der vorherige Stand). */
+export function loadRaw(): unknown {
+  return read(KEY);
+}
+export function loadBackup(): unknown {
+  return read(BACKUP);
+}
+
+/** Schreibt den neuen Stand; der bisherige wird vorher zur Sicherungskopie. */
 export function saveRaw(data: unknown): boolean {
   try {
+    const prev = localStorage.getItem(KEY);
+    if (prev) localStorage.setItem(BACKUP, prev);
     localStorage.setItem(KEY, JSON.stringify(data));
     return true;
   } catch {
@@ -23,6 +36,7 @@ export function saveRaw(data: unknown): boolean {
 export function clearSave(): void {
   try {
     localStorage.removeItem(KEY);
+    localStorage.removeItem(BACKUP);
   } catch {
     /* nichts zu tun */
   }
@@ -33,14 +47,16 @@ export interface Prefs {
   reducedMotion: boolean;
   /** nur Testmodus */
   speed: number;
+  music: number; // 0..1
+  sfx: number; // 0..1
 }
 
 export function loadPrefs(): Prefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs>;
-    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion(), speed: typeof p.speed === 'number' ? p.speed : 1 };
+    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion(), speed: typeof p.speed === 'number' ? p.speed : 1, music: typeof p.music === 'number' ? p.music : 0.5, sfx: typeof p.sfx === 'number' ? p.sfx : 0.7 };
   } catch {
-    return { vibration: true, reducedMotion: systemReducedMotion(), speed: 1 };
+    return { vibration: true, reducedMotion: systemReducedMotion(), speed: 1, music: 0.5, sfx: 0.7 };
   }
 }
 

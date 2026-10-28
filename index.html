@@ -41,12 +41,31 @@
       }
       #speed-badge { background: #6b2a2a; color: #ffd9d0; font-size: 11px; font-weight: 700; border-radius: 6px; padding: 3px 6px; }
       .speed-row { display: flex; gap: 6px; }
+      .slider { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
+      .slider span { width: 70px; }
+      .slider input { flex: 1; accent-color: var(--accent); height: 28px; }
+      .up.pulse { animation: rowpulse .5s ease; }
+      @keyframes rowpulse { 0% { background: rgba(255,214,140,.18); } 100% { background: transparent; } }
+      @media (prefers-reduced-motion: reduce) { .up.pulse { animation: none; } }
       .box .speed-row button { margin-top: 0; background: #2b251d; color: var(--ink); border: 1px solid var(--line); }
       .box .speed-row button.on { background: var(--accent); color: var(--accent-ink); }
+      .res .v { white-space: nowrap; }
+      @media (max-width: 360px) {
+        .res { padding: 2px 4px; }
+        .res .l { font-size: 10px; }
+        .res .v { font-size: 13px; }
+        #net { font-size: 10px; }
+        #btn-settings { width: 34px; height: 34px; font-size: 16px; }
+        #card { padding: 8px 10px; }
+        .card-desc { font-size: 12px; }
+        .grow { min-height: 40px; padding: 8px; font-size: 14px; }
+      }
       #btn-settings { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 10px;
         width: 38px; height: 38px; font-size: 18px; cursor: pointer; }
 
       main { position: relative; flex: 1; min-height: 200px; }
+      canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; cursor: pointer; }
       #hint { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); width: max-content; max-width: 90%;
         background: rgba(29,25,20,.9); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px;
@@ -144,11 +163,11 @@
         <button id="btn-settings" aria-label="Einstellungen">⚙</button>
       </header>
       <main>
-        <canvas id="cv"></canvas>
-        <div id="hint" hidden></div>
+        <canvas id="cv" tabindex="0" role="application"></canvas>
+        <div id="hint" hidden role="status" aria-live="polite"></div>
         <div id="season" hidden></div>
         <button id="btn-center" hidden>⌖ Zentrieren</button>
-        <div id="toast" hidden></div>
+        <div id="toast" hidden role="status" aria-live="polite"></div>
       </main>
       <section id="sheet">
         <div id="card" hidden></div>

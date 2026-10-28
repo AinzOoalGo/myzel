@@ -138,12 +138,45 @@ export class Renderer {
 
   resize(): void {
     const rect = this.canvas.getBoundingClientRect();
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : 1.25);
     this.w = rect.width;
     this.h = rect.height;
     this.canvas.width = Math.max(1, Math.round(rect.width * this.dpr));
     this.canvas.height = Math.max(1, Math.round(rect.height * this.dpr));
     this.seedDust();
+    this.bakeLayers();
+  }
+
+  /** Hintergrund und Vignette einmal pro Größe vorberechnen – spart pro Bild viel Zeichenarbeit. */
+  private bg: HTMLCanvasElement | null = null;
+  private vignette: HTMLCanvasElement | null = null;
+  private bakeLayers(): void {
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const bg = document.createElement('canvas');
+    bg.width = w;
+    bg.height = h;
+    const g = bg.getContext('2d')!;
+    g.fillStyle = '#16120e';
+    g.fillRect(0, 0, w, h);
+    if (this.soil) {
+      g.save();
+      g.scale(this.dpr * 1.5, this.dpr * 1.5);
+      g.fillStyle = this.soil;
+      g.fillRect(0, 0, w, h);
+      g.restore();
+    }
+    this.bg = bg;
+    const v = document.createElement('canvas');
+    v.width = w;
+    v.height = h;
+    const vg = v.getContext('2d')!;
+    const grad = vg.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.75);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+    vg.fillStyle = grad;
+    vg.fillRect(0, 0, w, h);
+    this.vignette = v;
   }
 
   private seedDust(): void {
@@ -354,6 +387,7 @@ export class Renderer {
   // ---------- Zeichnen ----------
 
   draw(s: GameState, dt: number, time: number): void {
+    this.watchPerformance(dt);
     this.refresh(s);
     this.updateCamera(s, dt);
     this.energy = Math.max(this.celebrate > 0 ? 0.8 : 0, this.energy - dt * 0.8);
@@ -362,21 +396,11 @@ export class Renderer {
     const sc = this.cam.scale;
     const px = 1 / sc; // ein Bildschirmpixel in Welteinheiten
 
-    // Boden (in Weltkoordinaten, verschiebt sich mit)
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // Boden: vorberechnetes Bild, eine einzige Kopie pro Bild
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = '#16120e';
-    ctx.fillRect(0, 0, this.w, this.h);
+    if (this.bg) ctx.drawImage(this.bg, 0, 0);
     this.applyWorld();
-    if (this.soil) {
-      const [x0, y0] = this.toWorld(0, 0);
-      const [x1, y1] = this.toWorld(this.w, this.h);
-      ctx.save();
-      ctx.scale(2, 2); // Textur gröber als die Welt
-      ctx.fillStyle = this.soil;
-      ctx.fillRect(x0 / 2, y0 / 2, (x1 - x0) / 2, (y1 - y0) / 2);
-      ctx.restore();
-    }
 
     // Steine und unverbundene Knoten unter den Fäden
     for (const n of this.visible) if (!n.connected) this.drawNode(n, time, px);
@@ -386,14 +410,15 @@ export class Renderer {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     const boost = 1 + this.energy * 0.7;
-    for (const h of this.rivalHyphae.values()) this.strokeHypha(h, h.main.total, 2.2, 1, px, true);
+    this.strokeNetwork([...this.rivalHyphae.values()].map((h) => ({ h, width: 2.2 })), 1, px, true);
+    const mine: { h: Hypha; width: number }[] = [];
     for (const e of s.edges) {
       const h = this.hyphae.get(`${e.from}>${e.to}`);
       if (!h) continue;
       const wgt = this.weights.get(e.to) ?? 1;
-      const width = Math.max(1.2 * px, 1.6 + Math.log2(wgt) * 0.9);
-      this.strokeHypha(h, h.main.total, width, boost, px);
+      mine.push({ h, width: 1.6 + Math.log2(wgt) * 0.9 });
     }
+    this.strokeNetwork(mine, boost, px, false);
     if (s.growth && this.growthPath) {
       const h = this.growthPath.hypha;
       const len = Math.min(1, s.growth.progress / s.growth.length) * h.main.total;
@@ -515,15 +540,15 @@ export class Renderer {
         }
       }
     }
-    // Vignette
-    const vg = ctx.createRadialGradient(this.w / 2, this.h / 2, Math.min(this.w, this.h) * 0.3, this.w / 2, this.h / 2, Math.max(this.w, this.h) * 0.75);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, this.w, this.h);
+    // Vignette (vorberechnet)
+    if (this.vignette) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(this.vignette, 0, 0);
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    }
 
     ctx.globalCompositeOperation = 'lighter';
-    if (!this.reducedMotion) {
+    if (!this.reducedMotion && this.quality === 'high') {
       for (const d of this.dust) {
         d.age += dt;
         d.x += d.vx * dt;
@@ -595,6 +620,83 @@ export class Renderer {
         return;
       }
       ctx.lineTo(p.xs[i]!, p.ys[i]!);
+    }
+  }
+
+  private pathCache = new WeakMap<Hypha, { main: Path2D; hairs: Path2D }>();
+  private paths(h: Hypha): { main: Path2D; hairs: Path2D } {
+    let c = this.pathCache.get(h);
+    if (!c) {
+      const toP = (p: Path) => {
+        const p2 = new Path2D();
+        p2.moveTo(p.xs[0]!, p.ys[0]!);
+        for (let i = 1; i < p.xs.length; i++) p2.lineTo(p.xs[i]!, p.ys[i]!);
+        return p2;
+      };
+      const hairs = new Path2D();
+      for (const hair of h.hairs) hairs.addPath(toP(hair.path));
+      c = { main: toP(h.main), hairs };
+      this.pathCache.set(h, c);
+    }
+    return c;
+  }
+
+  /**
+   * Fertige Fäden gebündelt zeichnen: gleiche Dicken landen in einem Pfad,
+   * so gibt es nur wenige Zeichenaufrufe statt drei pro Faden.
+   */
+  private strokeNetwork(items: { h: Hypha; width: number }[], boost: number, px: number, rival: boolean): void {
+    if (!items.length) return;
+    const { ctx } = this;
+    const glow = rival ? GLOW_RIVAL : GLOW_WARM;
+    const core = rival ? CORE_RIVAL : CORE;
+    const buckets = new Map<number, Path2D>();
+    const hairs = new Path2D();
+    let anyHairs = false;
+    for (const { h, width } of items) {
+      const w = Math.max(Math.round(width * 2) / 2, 1.2 * px);
+      const key = Math.round(w * 100);
+      let b = buckets.get(key);
+      if (!b) buckets.set(key, (b = new Path2D()));
+      const c = this.paths(h);
+      b.addPath(c.main);
+      if (this.quality === 'high' && h.main.total >= 40 * px) {
+        hairs.addPath(c.hairs);
+        anyHairs = true;
+      }
+    }
+    for (const [key, path] of buckets) {
+      const width = key / 100;
+      if (this.quality === 'high') {
+        ctx.strokeStyle = `${glow}${0.07 * boost})`;
+        ctx.lineWidth = width * 5 + 4 * px;
+        ctx.stroke(path);
+      }
+      ctx.strokeStyle = `${glow}${(this.quality === 'high' ? 0.16 : 0.24) * boost})`;
+      ctx.lineWidth = width * 2.2;
+      ctx.stroke(path);
+      ctx.strokeStyle = `${core}${Math.min(1, 0.75 * boost)})`;
+      ctx.lineWidth = Math.max(px, width * 0.8);
+      ctx.stroke(path);
+    }
+    if (anyHairs) {
+      ctx.strokeStyle = `${core}${0.35 * boost})`;
+      ctx.lineWidth = Math.max(0.8 * px, 0.5);
+      ctx.stroke(hairs);
+    }
+  }
+
+  /** Bildqualität: sinkt automatisch, wenn das Gerät nicht hinterherkommt. */
+  quality: 'high' | 'low' = 'high';
+  private slowTime = 0;
+  private fpsEma = 60;
+  private watchPerformance(dt: number): void {
+    if (dt <= 0 || dt > 0.5 || this.quality === 'low') return;
+    this.fpsEma = this.fpsEma * 0.95 + (1 / dt) * 0.05;
+    this.slowTime = this.fpsEma < 38 ? this.slowTime + dt : 0;
+    if (this.slowTime > 3) {
+      this.quality = 'low';
+      this.resize();
     }
   }
 
