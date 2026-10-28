@@ -1,6 +1,7 @@
 import { CONFIG, type Cost, type EventType, type GenomeDef, type GenomeId, type Season, type UpgradeDef, type UpgradeId, type Zone } from './config';
 import { generateMap, pointSegmentDistance, type MapNode } from './map';
 import { createRng } from './rng';
+import { bump, newDaily, type Daily } from './daily';
 
 export interface Edge {
   from: number;
@@ -28,6 +29,10 @@ export interface Meta {
   sporesTotal: number; // jemals gewonnen → Dauerbonus
   runs: number; // abgeschlossene Sporenflüge
   genome: GenomeId[];
+  /** Stufen der Mutationen (fehlt ein Eintrag, ist eine gekaufte Mutation Stufe 1) */
+  genomeLevels: Partial<Record<GenomeId, number>>;
+  /** tägliche Aufgaben (bleiben über den Sporenflug erhalten) */
+  daily: Daily;
   achievements: string[];
   lifetime: {
     totalN: number;
@@ -103,6 +108,8 @@ export function newMeta(): Meta {
     sporesTotal: 0,
     runs: 0,
     genome: [],
+    genomeLevels: {},
+    daily: newDaily(),
     achievements: [],
     lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0, seasons: 0, rivalsBeaten: 0, minerals: 0, windSeen: 0 },
   };
@@ -124,13 +131,19 @@ export function newGame(seed = Math.floor(Math.random() * 2 ** 31), meta: Meta =
     rivals: [],
   };
   initRivals(s);
-  if (has(s, 'p4')) s.res.n = CONFIG.genomeEffects.p4Start;
+  if (has(s, 'p4')) s.res.n = CONFIG.genomeEffects.p4Start * 10 ** (lv(s, 'p4') - 1);
   return s;
 }
 
 // ---------- Modifikatoren ----------
 
 export const has = (s: GameState, id: GenomeId): boolean => s.meta.genome.includes(id);
+
+/** Stufe einer Mutation: 0 = nicht gekauft. */
+export const lv = (s: GameState, id: GenomeId): number => (has(s, id) ? Math.max(1, s.meta.genomeLevels[id] ?? 1) : 0);
+
+/** Multiplikator mit Stufe-1-Wert v: 1 + (v − 1) × Stufe; Stufe 0 → 1. */
+const mul = (s: GameState, id: GenomeId, v: number): number => 1 + (v - 1) * lv(s, id);
 
 export function eventActive(s: GameState, type: ActiveEvent['type']): boolean {
   return s.events.active?.type === type && s.events.active.until > s.stats.playSeconds;
@@ -173,8 +186,8 @@ export function mods(s: GameState) {
   const se = season(s);
   const z2 = s.zone >= 2;
   const z3 = s.zone >= 3;
-  const trees = has(s, 's4') ? s.nodes.reduce((c, n) => c + (n.connected && isTree(n) ? 1 : 0), 0) : 0;
-  const nodes = has(s, 'w4') ? connectedCount(s) : 0;
+  const trees = has(s, 's4') ? s.nodes.reduce((c, n) => c + (n.connected && isTree(n) ? 1 : 0), 0) * lv(s, 's4') : 0;
+  const nodes = has(s, 'w4') ? connectedCount(s) * lv(s, 'w4') : 0;
   const global =
     (1 + CONFIG.prestige.sporeBonus * s.meta.sporesTotal) *
     (1 + CONFIG.achievementBonus * s.meta.achievements.length) *
@@ -184,18 +197,18 @@ export function mods(s: GameState) {
     (se === 'winter' ? sc.winter.global : 1);
   return {
     global,
-    tap: has(s, 'z3') ? g.z3Tap : 1,
-    decomp: (1 + CONFIG.effects.enzymDecomp * s.levels.enzym) * (has(s, 'z1') ? g.z1Decomp : 1),
-    laub: (has(s, 'z4') ? g.z4Laub : 1) * (se === 'herbst' ? sc.herbst.laub : 1),
-    stock: has(s, 'z2') ? g.z2Stock : 1,
-    sugar: (has(s, 's1') ? g.s1Sugar : 1) * (se === 'sommer' ? sc.sommer.sugar : 1),
+    tap: mul(s, 'z3', g.z3Tap),
+    decomp: (1 + CONFIG.effects.enzymDecomp * s.levels.enzym) * mul(s, 'z1', g.z1Decomp),
+    laub: mul(s, 'z4', g.z4Laub) * (se === 'herbst' ? sc.herbst.laub : 1),
+    stock: mul(s, 'z2', g.z2Stock),
+    sugar: mul(s, 's1', g.s1Sugar) * (se === 'sommer' ? sc.sommer.sugar : 1),
     water:
-      (has(s, 's2') ? g.s2Water : 1) * (eventActive(s, 'regen') ? CONFIG.events.regen.water : 1) * (se === 'sommer' ? sc.sommer.water : 1),
-    waterCap: CONFIG.waterCap * (has(s, 's2') ? g.s2Cap : 1),
-    growthCost: CONFIG.effects.rhizoCost ** s.levels.rhizo * (has(s, 'p1') ? g.p1Cost : 1),
+      mul(s, 's2', g.s2Water) * (eventActive(s, 'regen') ? CONFIG.events.regen.water : 1) * (se === 'sommer' ? sc.sommer.water : 1),
+    waterCap: CONFIG.waterCap * mul(s, 's2', g.s2Cap),
+    growthCost: CONFIG.effects.rhizoCost ** s.levels.rhizo * 1 / (1 + (1 / g.p1Cost - 1) * lv(s, 'p1')), // Stufe 1: ×0,8 · Stufe 5: ×0,44 (abnehmender Effekt)
     growthSpeed:
       (1 + CONFIG.effects.rhizoSpeed * s.levels.rhizo) *
-      (has(s, 'p3') ? g.p3Speed : 1) *
+      mul(s, 'p3', g.p3Speed) *
       (eventActive(s, 'regen') ? CONFIG.events.regen.growth : 1) *
       (z2 ? CONFIG.zone2.speedBonus : 1) *
       (z3 ? CONFIG.zone3.speedBonus : 1) *
@@ -203,12 +216,13 @@ export function mods(s: GameState) {
     reach:
       CONFIG.growth.reach +
       CONFIG.growth.reachPerRhizo * s.levels.rhizo +
-      (has(s, 'p2') ? g.p2Reach : 0) +
+      g.p2Reach * lv(s, 'p2') +
       (z2 ? CONFIG.zone2.reachBonus : 0) +
       (z3 ? CONFIG.zone3.reachBonus + CONFIG.effects.fernReach * s.levels.fern : 0),
-    offlineCap: has(s, 's3') ? g.s3Offline : CONFIG.offlineCapSeconds,
-    minerals: has(s, 'w2') ? g.w2Min : 1,
-    hex: has(s, 'w3') ? g.w3Hex : 1,
+    // jede Stufe „Langer Schlaf“ verlängert die Offline-Grenze um weitere 12 Stunden
+    offlineCap: CONFIG.offlineCapSeconds + (g.s3Offline - CONFIG.offlineCapSeconds) * lv(s, 's3'),
+    minerals: mul(s, 'w2', g.w2Min),
+    hex: mul(s, 'w3', g.w3Hex),
   };
 }
 
@@ -359,7 +373,12 @@ function advanceGrowth(s: GameState, units: number): void {
     s.growth = null;
     if (!target) return;
     if (target.type === 'rivale') defeatRival(s, target.owner - 1);
-    else if (target.owner > 0) releaseNode(s, target);
+    else if (target.owner > 0) {
+      releaseNode(s, target);
+      bump(s, 'reclaim');
+    }
+    bump(s, 'connect');
+    bump(s, 'connect_type', 1, target.type);
     target.connected = true;
     s.edges.push({ from: g.from, to: g.to });
     const c = connectedCount(s);
@@ -496,7 +515,7 @@ function updateEvents(s: GameState, offline: boolean): void {
   const c = CONFIG.events;
   ev.nextAt = now + c.minGap + rng() * (c.maxGap - c.minGap);
   const hasTree = sugarUnlocked(s);
-  const windW = s.zone >= 3 ? c.weights.wind * (has(s, 'w1') ? CONFIG.genomeEffects.w1Wind : 1) : 0;
+  const windW = s.zone >= 3 ? c.weights.wind * mul(s, 'w1', CONFIG.genomeEffects.w1Wind) : 0;
   const weights = { ...c.weights, duerre: hasTree ? c.weights.duerre : 0, wind: windW };
   const total = weights.regen + weights.duerre + weights.gold + weights.wind;
   let roll = rng() * total;
@@ -517,7 +536,7 @@ function updateEvents(s: GameState, offline: boolean): void {
     ev.golden = { x: a.x + Math.cos(ang) * d, y: a.y + Math.sin(ang) * d, until: now + c.gold.duration };
     return;
   }
-  const dur = c[type].duration * (type === 'wind' && has(s, 'w1') ? 1.5 : 1);
+  const dur = c[type].duration * (type === 'wind' ? 1 + 0.5 * lv(s, 'w1') : 1);
   ev.active = { type, until: now + dur };
   if (type === 'regen') s.meta.lifetime.rainSeen++;
   if (type === 'wind') s.meta.lifetime.windSeen++;
@@ -530,6 +549,7 @@ export function catchGolden(s: GameState): number {
   addNutrients(s, reward);
   s.events.golden = null;
   s.meta.lifetime.goldCaught++;
+  bump(s, 'gold');
   return reward;
 }
 
@@ -539,6 +559,7 @@ export function tap(s: GameState): number {
   const v = tapValue(s);
   addNutrients(s, v);
   s.stats.taps++;
+  bump(s, 'taps');
   s.meta.lifetime.taps++;
   advanceGrowth(s, CONFIG.growth.tapBoost * mods(s).growthSpeed);
   return v;
@@ -637,6 +658,7 @@ export function buy(s: GameState, id: UpgradeId): boolean {
   s.res.sugar -= c.sugar;
   s.res.minerals -= c.min;
   s.levels[id]++;
+  bump(s, 'buy');
   return true;
 }
 
@@ -666,10 +688,14 @@ export function prestige(s: GameState, newSeed = Math.floor(Math.random() * 2 **
     sporesTotal: s.meta.sporesTotal + gain,
     runs: s.meta.runs + 1,
     genome: [...s.meta.genome],
+    genomeLevels: { ...s.meta.genomeLevels },
+    daily: structuredClone(s.meta.daily),
     achievements: [...s.meta.achievements],
     lifetime: { ...s.meta.lifetime },
   };
-  return newGame(newSeed, meta);
+  const next = newGame(newSeed, meta);
+  bump(next, 'prestige');
+  return next;
 }
 
 export function genomeDef(id: GenomeId): GenomeDef {
@@ -678,19 +704,28 @@ export function genomeDef(id: GenomeId): GenomeDef {
   return d;
 }
 
+/** Nächste Stufe kaufbar? (Stufe 1 braucht die Mutation davor im selben Ast) */
 export function genomeAvailable(s: GameState, id: GenomeId): boolean {
-  if (has(s, id)) return false;
+  if (lv(s, id) >= CONFIG.genomeMaxLevel) return false;
+  if (has(s, id)) return true;
   const d = genomeDef(id);
   if (d.tier === 1) return true;
   const prev = CONFIG.genome.find((g) => g.branch === d.branch && g.tier === d.tier - 1);
   return !!prev && has(s, prev.id);
 }
 
+/** Preis der nächsten Stufe in Sporen. */
+export function genomeCost(s: GameState, id: GenomeId): number {
+  return Math.round(genomeDef(id).cost * CONFIG.genomeCostGrowth ** lv(s, id));
+}
+
 export function buyGenome(s: GameState, id: GenomeId): boolean {
   if (!genomeAvailable(s, id)) return false;
-  const d = genomeDef(id);
-  if (s.meta.spores < d.cost) return false;
-  s.meta.spores -= d.cost;
-  s.meta.genome.push(id);
+  const cost = genomeCost(s, id);
+  if (s.meta.spores < cost) return false;
+  s.meta.spores -= cost;
+  bump(s, 'genome');
+  if (!has(s, id)) s.meta.genome.push(id);
+  else s.meta.genomeLevels[id] = lv(s, id) + 1;
   return true;
 }

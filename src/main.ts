@@ -1,11 +1,13 @@
 import { CONFIG, RELEASE, type Branch, type GenomeId, type UpgradeId } from './core/config';
 import { ACHIEVEMENTS, checkAchievements } from './core/achievements';
+import { claimQuest, dayKey, questDone, questReward, rollDaily, type Quest } from './core/daily';
 import {
   buyGenome,
   canPrestige,
   catchGolden,
   genomeAvailable,
-  has,
+  genomeCost,
+  lv,
   mods,
   nodeYield,
   nodeWater,
@@ -371,6 +373,14 @@ let activeTab: Tab = 'grow';
 const TABS: Tab[] = ['grow', 'genome', 'ach'];
 
 let panelOpen = false;
+let lastClaimable = false;
+/** Tageswechsel prüfen (beim Start, beim Zurückkehren in die App und jede Minute) */
+function checkDay(): void {
+  if (rollDaily(state, dayKey(new Date()))) {
+    save();
+    if (activeTab === 'ach' && panelOpen) buildAchievements();
+  }
+}
 
 /** Liste auf- oder zuklappen. Zu = mehr Spielfeld. */
 function setPanel(open: boolean): void {
@@ -402,7 +412,7 @@ function onTabButton(tab: Tab): void {
 }
 
 function genomeAffordable(): boolean {
-  return CONFIG.genome.some((g) => genomeAvailable(state, g.id) && state.meta.spores >= g.cost);
+  return CONFIG.genome.some((g) => genomeAvailable(state, g.id) && state.meta.spores >= genomeCost(state, g.id));
 }
 
 function updateTabs(): void {
@@ -410,6 +420,11 @@ function updateTabs(): void {
   $('#tabs [data-tab="grow"] .badge').hidden = !UPGRADE_IDS.some((id) => canBuy(state, id));
   $('#tabs [data-tab="genome"] .badge').hidden = !(canPrestige(state) || genomeAffordable());
   $('#tabs [data-tab="ach"] .count').textContent = `${state.meta.achievements.length}/${ACHIEVEMENTS.length}`;
+  // Punkt am Erfolge-Knopf: eine Tagesaufgabe wartet aufs Abholen
+  const claimable = state.meta.daily.quests.some((q) => !q.claimed && questDone(q));
+  $('#tabs [data-tab="ach"] .badge').hidden = !claimable;
+  if (claimable !== lastClaimable && activeTab === 'ach' && panelOpen) buildAchievements();
+  lastClaimable = claimable;
 }
 
 function sporeBonusPct(): string {
@@ -448,12 +463,16 @@ function buildGenome(): void {
     for (const g of CONFIG.genome.filter((x) => x.branch === branch)) {
       const row = el('div', '', 'up');
       const text = el('div', '', 'up-text');
-      text.append(el('div', t(`g_${g.id}` as TextKey), 'up-name'), el('div', t(`g_${g.id}_desc` as TextKey), 'up-desc'));
-      const owned = has(state, g.id);
-      const b = el('button', owned ? t('genome_owned') : `${g.cost} Sp.`, 'buy');
-      b.disabled = owned || !genomeAvailable(state, g.id) || state.meta.spores < g.cost;
-      if (owned) b.classList.add('owned');
-      if (!owned && !genomeAvailable(state, g.id)) b.title = t('genome_locked');
+      const level = lv(state, g.id);
+      const name = el('div', t(`g_${g.id}` as TextKey), 'up-name');
+      if (level > 0) name.append(' ', el('small', t('genome_level', { v: level, max: CONFIG.genomeMaxLevel })));
+      text.append(name, el('div', t(`g_${g.id}_desc` as TextKey), 'up-desc'));
+      const maxed = level >= CONFIG.genomeMaxLevel;
+      const cost = genomeCost(state, g.id);
+      const b = el('button', maxed ? t('genome_max') : `${fmt(cost)} Sp.`, 'buy');
+      b.disabled = maxed || !genomeAvailable(state, g.id) || state.meta.spores < cost;
+      if (maxed) b.classList.add('owned');
+      if (level === 0 && !genomeAvailable(state, g.id)) b.title = t('genome_locked');
       b.addEventListener('click', () => {
         if (buyGenome(state, g.id as GenomeId)) {
           haptic(20);
@@ -470,9 +489,51 @@ function buildGenome(): void {
   updatePrestigeBox();
 }
 
+function questText(q: Quest): string {
+  const node = q.nodeType ? t(`node_${q.nodeType}` as TextKey) : '';
+  return t(`q_${q.kind}` as TextKey, { n: fmt(q.target), node });
+}
+
+/** Tagesaufgaben oben im Erfolge-Tab */
+function buildQuests(box: HTMLElement): void {
+  const d = state.meta.daily;
+  const head = el('div', '', 'quest-head');
+  head.append(el('strong', t('quests_title')));
+  if (d.streak > 0) head.append(el('span', t('quests_streak', { v: d.streak }), 'small'));
+  box.append(head);
+  d.quests.forEach((q, i) => {
+    const row = el('div', '', `up quest${q.claimed ? ' claimed' : ''}`);
+    const text = el('div', '', 'up-text');
+    text.append(el('div', questText(q), 'up-name'));
+    const bar = el('div', '', 'qbar');
+    const fill = el('i');
+    fill.style.width = `${Math.round((100 * q.progress) / q.target)}%`;
+    bar.append(fill);
+    text.append(bar, el('div', `${fmt(q.progress)} / ${fmt(q.target)}`, 'up-desc'));
+    const btn = el('button', q.claimed ? '✓' : `+${fmt(questReward(state))} Sp.`, 'buy');
+    btn.disabled = q.claimed || !questDone(q);
+    if (q.claimed) btn.classList.add('owned');
+    btn.addEventListener('click', () => {
+      const r = claimQuest(state, i);
+      if (r > 0) {
+        haptic(25);
+        audio.play('achievement');
+        toast(t('quest_claimed', { v: fmt(r) }));
+        save();
+        buildAchievements();
+        updateUi(true);
+      }
+    });
+    row.append(text, btn);
+    box.append(row);
+  });
+  box.append(el('p', t('quests_hint'), 'small'));
+}
+
 function buildAchievements(): void {
   const box = $('#tab-ach');
   box.innerHTML = '';
+  buildQuests(box);
   const n = state.meta.achievements.length;
   box.append(el('p', t('ach_header', { c: n, t: ACHIEVEMENTS.length, b: fmt(n * CONFIG.achievementBonus * 100) }), 'spores-line'));
   for (const a of ACHIEVEMENTS) {
@@ -898,7 +959,10 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     save();
     audio.suspend();
-  } else audio.resume();
+  } else {
+    audio.resume();
+    checkDay();
+  }
 });
 window.addEventListener('pagehide', save);
 // Größe neu messen, wenn sich die Fläche ändert (Fenster, Infokarte ein/aus, Drehen)
@@ -921,6 +985,8 @@ for (const tb of TABS) {
 buildUpgrades();
 panelOpen = prefs.panelOpen;
 setTab('grow');
+checkDay();
+setInterval(checkDay, 60_000);
 checkAchievements(state);
 renderer.reducedMotion = prefs.reducedMotion;
 renderer.resize();

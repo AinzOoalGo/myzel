@@ -115,6 +115,11 @@
       h3.branch { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--quiet); margin: 14px 0 2px; }
       .ach { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); opacity: .5; }
       .ach.done { opacity: 1; }
+      .quest-head { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 0 2px; }
+      .quest .up-name { font-size: 13.5px; }
+      .quest.claimed { opacity: .55; }
+      .qbar { height: 5px; background: #2b251d; border-radius: 3px; margin: 4px 0 2px; overflow: hidden; }
+      .qbar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
       .ach-mark { width: 22px; text-align: center; color: var(--accent); font-weight: 700; }
       #toast { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); background: #2b251d; color: var(--ink);
         border: 1px solid var(--accent); border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 600;
@@ -217,7 +222,7 @@
         <nav id="tabs">
           <button data-tab="grow" aria-expanded="false"><span class="label"></span><i class="badge" hidden></i></button>
           <button data-tab="genome" aria-expanded="false"><span class="label"></span><i class="badge" hidden></i></button>
-          <button data-tab="ach" aria-expanded="false"><span class="label"></span> <small class="count"></small></button>
+          <button data-tab="ach" aria-expanded="false"><span class="label"></span> <small class="count"></small><i class="badge" hidden></i></button>
         </nav>
       </section>
     </div>

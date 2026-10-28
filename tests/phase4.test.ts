@@ -6,6 +6,8 @@ import {
   catchGolden,
   computeRates,
   genomeAvailable,
+  genomeCost,
+  lv,
   growthCost,
   newGame,
   prestige,
@@ -193,5 +195,46 @@ describe('Spielstand v2', () => {
     const raw = serialize(newGame(8), 0) as unknown as { meta: { genome: string[] } };
     raw.meta.genome = ['z1', 'hack'];
     expect(deserialize(raw).meta.genome).toEqual(['z1']);
+  });
+});
+
+describe('Genom-Stufen', () => {
+  it('Mutationen lassen sich bis Stufe 5 verbessern, jede Stufe teurer', () => {
+    const s = newGame(1);
+    s.meta.spores = 1e6;
+    const costs: number[] = [];
+    for (let i = 0; i < CONFIG.genomeMaxLevel; i++) {
+      costs.push(genomeCost(s, 'z1'));
+      expect(buyGenome(s, 'z1')).toBe(true);
+    }
+    expect(lv(s, 'z1')).toBe(CONFIG.genomeMaxLevel);
+    expect(buyGenome(s, 'z1')).toBe(false);
+    for (let i = 1; i < costs.length; i++) expect(costs[i]!).toBeGreaterThan(costs[i - 1]!);
+  });
+  it('Wirkung wächst mit der Stufe', () => {
+    const s = newGame(1);
+    const base = tapValue(s);
+    s.meta.genome.push('z3');
+    expect(tapValue(s)).toBeCloseTo(base * 2, 9);
+    s.meta.genomeLevels.z3 = 3;
+    expect(tapValue(s)).toBeCloseTo(base * 4, 9);
+    const c = growthCost(s, 100);
+    s.meta.genome.push('p1');
+    s.meta.genomeLevels.p1 = 2;
+    expect(growthCost(s, 100)).toBeCloseTo(c / 1.5, 9);
+  });
+  it('Stufen überleben Sporenflug und Speichern', () => {
+    const s = newGame(1);
+    s.meta.genome.push('s3');
+    s.meta.genomeLevels.s3 = 4;
+    const back = deserialize(JSON.parse(JSON.stringify(serialize(s, 0))));
+    expect(lv(back, 's3')).toBe(4);
+    expect(applyOffline(back, 0, 1e12).seconds).toBe(CONFIG.offlineCapSeconds + 12 * 3600 * 4);
+  });
+  it('alte Spielstände ohne Stufen haben Stufe 1', () => {
+    const raw = serialize(newGame(8), 0) as unknown as { meta: { genome: string[]; genomeLevels?: unknown } };
+    raw.meta.genome = ['z1'];
+    delete raw.meta.genomeLevels;
+    expect(lv(deserialize(raw), 'z1')).toBe(1);
   });
 });

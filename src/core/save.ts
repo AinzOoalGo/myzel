@@ -2,6 +2,7 @@ import { type GenomeId, type UpgradeId } from './config';
 import { generateMap } from './map';
 import { connectedCount, mods, newGame, newMeta, simulate, type Edge, type EventsState, type GameState, type Growth, type Meta, type Rival } from './game';
 import { CONFIG, type Zone } from './config';
+import type { Daily } from './daily';
 
 /**
  * Spielstände sind versioniert. Bei jeder Formatänderung:
@@ -10,10 +11,10 @@ import { CONFIG, type Zone } from './config';
  *  3. einen Test mit einem echten alten Spielstand hinzufügen
  * So gehen alte Spielstände bei Updates nie verloren.
  */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
-export interface SaveV4 {
-  v: 4;
+export interface SaveV5 {
+  v: 5;
   savedAt: number; // ms seit Epoche
   seed: number;
   connected: number[];
@@ -52,18 +53,20 @@ const MIGRATIONS: Record<number, (old: AnySave) => AnySave> = {
   },
   // v3 → v4: Zone 3, Mineralien, neue Upgrades. Neue Felder haben beim Lesen sichere Standardwerte.
   3: (s) => ({ ...s, v: 4 }),
+  // v4 → v5: Genom-Stufen und tägliche Aufgaben (beide mit sicheren Standardwerten beim Lesen)
+  4: (s) => ({ ...s, v: 5 }),
 };
 
 const num = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 
-export function serialize(s: GameState, now: number): SaveV4 {
+export function serialize(s: GameState, now: number): SaveV5 {
   const fresh = generateMap(s.seed);
   const stocks: Record<string, number> = {};
   for (const n of s.nodes) {
     if (n.type === 'totholz' && n.stock !== fresh[n.id]?.stock) stocks[n.id] = n.stock;
   }
   return {
-    v: 4,
+    v: 5,
     savedAt: now,
     seed: s.seed,
     connected: s.nodes.filter((n) => n.connected && n.type !== 'spore').map((n) => n.id),
@@ -82,7 +85,7 @@ export function serialize(s: GameState, now: number): SaveV4 {
   };
 }
 
-function migrate(raw: AnySave): SaveV4 {
+function migrate(raw: AnySave): SaveV5 {
   let cur = raw;
   while (cur.v < SAVE_VERSION) {
     const step = MIGRATIONS[cur.v];
@@ -90,7 +93,7 @@ function migrate(raw: AnySave): SaveV4 {
     cur = step(cur);
   }
   if (cur.v !== SAVE_VERSION) throw new Error(`Spielstand-Version ${cur.v} ist neuer als dieses Spiel`);
-  return cur as unknown as SaveV4;
+  return cur as unknown as SaveV5;
 }
 
 const GENOME_IDS = new Set<GenomeId>(CONFIG.genome.map((g) => g.id));
@@ -99,11 +102,28 @@ function readMeta(m: Partial<Meta> | undefined): Meta {
   const base = newMeta();
   if (!m) return base;
   const lt: Partial<Meta['lifetime']> = m.lifetime ?? {};
+  const d = (m.daily ?? {}) as Partial<Daily>;
+  const daily: Daily = {
+    day: typeof d.day === 'string' ? d.day : '',
+    quests: Array.isArray(d.quests)
+      ? d.quests
+          .filter((q) => q && typeof q.kind === 'string')
+          .map((q) => ({ kind: q.kind, nodeType: q.nodeType, target: num(q.target, 1), progress: num(q.progress), claimed: q.claimed === true }))
+      : [],
+    streak: num(d.streak),
+    lastCompleteDay: typeof d.lastCompleteDay === 'string' ? d.lastCompleteDay : null,
+  };
   return {
+    daily,
     spores: num(m.spores),
     sporesTotal: num(m.sporesTotal),
     runs: num(m.runs),
     genome: Array.isArray(m.genome) ? m.genome.filter((g): g is GenomeId => GENOME_IDS.has(g)) : [],
+    genomeLevels: Object.fromEntries(
+      Object.entries(m.genomeLevels ?? {})
+        .filter(([k, v]) => GENOME_IDS.has(k as GenomeId) && typeof v === 'number')
+        .map(([k, v]) => [k, Math.max(1, Math.min(CONFIG.genomeMaxLevel, Math.floor(v as number)))]),
+    ),
     achievements: Array.isArray(m.achievements) ? m.achievements.filter((a) => typeof a === 'string') : [],
     lifetime: {
       totalN: num(lt.totalN),

@@ -35,6 +35,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'spore_5', check: (s) => s.meta.runs >= 5 },
   { id: 'genome_branch', check: (s) => ['z4', 's4', 'p4', 'w4'].some((id) => s.meta.genome.includes(id as never)) },
   { id: 'genome_all', check: (s) => s.meta.genome.length >= CONFIG.genome.length },
+  { id: 'genome_max', check: (s) => Object.values(s.meta.genomeLevels).some((l) => (l ?? 0) >= CONFIG.genomeMaxLevel) },
   { id: 'zone2', check: (s) => s.zone >= 2 },
   { id: 'net_60', check: (s) => connectedCount(s) >= CONFIG.zone2.goal },
   { id: 'altbaum', check: (s) => countType(s, 'altbaum') >= 1 },

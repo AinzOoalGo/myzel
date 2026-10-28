@@ -116,9 +116,9 @@ export const CONFIG = {
     rivalMaxReach: 1600,
     reachBonus: 420, // zusätzlich zur Zone-2-Reichweite
     speedBonus: 2.5, // zusätzlich zum Zone-2-Tempo
-    costPerNode: 1.14,
+    costPerNode: 1.2,
     /** Jenseits des Waldes wächst der Entfernungsbonus langsamer (sonst explodieren die Erträge) */
-    distanceScaleOuter: 1400,
+    distanceScaleOuter: 2000,
     /** Klima je Himmelsrichtung (Drittel des Kreises) */
     climate: {
       tropen: { yield: 1.5, growth: 1.2, water: 1 },
@@ -231,6 +231,14 @@ export const CONFIG = {
     { id: 'w4', branch: 'wanderer', tier: 4, cost: 80 },
   ] as GenomeDef[],
 
+  /** Jede Mutation lässt sich bis zu dieser Stufe verbessern; jede Stufe kostet ×costGrowth mehr. */
+  genomeMaxLevel: 5,
+  genomeCostGrowth: 5,
+
+  /**
+   * Wirkung auf Stufe 1. Höhere Stufen: Multiplikatoren wachsen linear (1,5 → 2 → 2,5 …),
+   * Zuschläge vervielfachen sich, Kostensenker wirken mehrfach (0,8 → 0,64 …). Siehe genomeValue() in game.ts.
+   */
   genomeEffects: {
     z1Decomp: 1.5, // Laub und Totholz ×1,5
     z2Stock: 1.5, // Totholz liefert ×1,5 aus seinem Vorrat

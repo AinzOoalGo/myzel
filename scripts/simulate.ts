@@ -12,6 +12,7 @@ import {
   buyGenome,
   catchGolden,
   genomeAvailable,
+  genomeCost,
   prestige,
   sporeGain,
   canBuy,
@@ -101,7 +102,7 @@ function targetScore(s: GameState, id: number, cost: number): number {
 const reachCache = new WeakMap<GameState, { key: string; list: { id: number; length: number }[] }>();
 function reachableTargets(s: GameState): { id: number; length: number }[] {
   const owned = s.nodes.reduce((c, n) => c + n.owner, 0);
-  const key = `${s.edges.length}|${s.zone}|${s.levels.rhizo}|${s.levels.fern}|${s.meta.genome.length}|${owned}`;
+  const key = `${s.edges.length}|${s.zone}|${s.levels.rhizo}|${s.levels.fern}|${s.meta.genome.length}:${Object.values(s.meta.genomeLevels).join('')}|${owned}`;
   const hit = reachCache.get(s);
   if (hit && hit.key === key) return hit.list;
   const list: { id: number; length: number }[] = [];
@@ -261,7 +262,8 @@ interface CampaignTarget {
 }
 const TARGETS: CampaignTarget[] = [
   { goal: CONFIG.zone2.goal, label: 'Zone 2 geschafft', activeBand: [2 * 3600, 12 * 3600] },
-  { goal: CONFIG.zone3.goal, label: 'Zone 3 geschafft', activeBand: [8 * 3600, 40 * 3600] },
+  // seit 1.2 (Genom-Stufen, Tagesaufgaben) etwas schneller; Maßstab ist der normale Spieler mit ~15 Std.
+  { goal: CONFIG.zone3.goal, label: 'Zone 3 geschafft', activeBand: [6 * 3600, 40 * 3600] },
 ];
 
 for (const p of QUICK ? [PROFILES[0]!] : [PROFILES[0]!, PROFILES[1]!]) {
@@ -288,7 +290,12 @@ for (const p of QUICK ? [PROFILES[0]!] : [PROFILES[0]!, PROFILES[1]!]) {
       if (connectedCount(res.state) >= CONFIG.zone3.goal) break;
       const next = prestige(res.state, seed * 1000 + runs);
       if (!next) break;
-      for (const id of GENOME_ORDER) if (genomeAvailable(next, id)) buyGenome(next, id);
+      // erst alles freischalten, dann immer die günstigste nächste Stufe kaufen
+      for (const id of GENOME_ORDER) if (!next.meta.genome.includes(id) && genomeAvailable(next, id)) buyGenome(next, id);
+      for (;;) {
+        const opts = GENOME_ORDER.filter((id) => genomeAvailable(next, id)).sort((a, b) => genomeCost(next, a) - genomeCost(next, b));
+        if (!opts.length || !buyGenome(next, opts[0]!)) break;
+      }
       state = next;
     }
     for (const tg of TARGETS) reached[tg.goal]!.push(firstAt[tg.goal] ?? Infinity);

@@ -287,7 +287,7 @@ export class Renderer {
     // leere Totholz-Knoten und Baumversorgung ändern den Fluss, also gehören sie in den Schlüssel
     const empty = s.nodes.reduce((c, n) => c + (n.connected && n.type === 'totholz' && n.stock <= 0 ? 1 : 0), 0);
     const trees = computeRates(s).treeSupply > 0 ? 1 : 0;
-    const key = `${s.seed}|${s.zone}|${s.edges.length}|${s.levels.rhizo}|${s.growth ? s.growth.to : -1}|${rivalKey}|${s.meta.genome.length}|${empty}|${trees}`;
+    const key = `${s.seed}|${s.zone}|${s.edges.length}|${s.levels.rhizo}|${s.growth ? s.growth.to : -1}|${rivalKey}|${s.meta.genome.length}:${Object.values(s.meta.genomeLevels).join('')}|${empty}|${trees}`;
     if (key === this.cacheKey) return;
     this.cacheKey = key;
     const r = reach(s);
