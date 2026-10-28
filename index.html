@@ -29,7 +29,8 @@
       .res { display: flex; flex-direction: column; line-height: 1.1; padding: 2px 8px; border-left: 1px solid var(--line); }
       .res .l { font-size: 11px; color: var(--quiet); }
       .res .v { font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; }
-      .res .r { font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
+      .res .r { font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .res .r.neg { color: var(--warn); }
       #net { margin-left: auto; font-size: 12px; color: var(--quiet); }
       @media (max-width: 480px) {
         header { flex-wrap: nowrap; gap: 4px; padding-left: 8px; padding-right: 8px; }
@@ -167,8 +168,8 @@
       <header>
         <span id="title"></span>
         <div class="res" id="res-n"><span class="l"></span><span class="v">0</span><span class="r"></span></div>
-        <div class="res" id="res-sugar" hidden><span class="l"></span><span class="v">0</span></div>
-        <div class="res" id="res-water" hidden><span class="l"></span><span class="v">0</span></div>
+        <div class="res" id="res-sugar" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
+        <div class="res" id="res-water" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
         <div class="res" id="res-spores" hidden><span class="l"></span><span class="v">0</span></div>
         <span id="net"></span>
         <span id="speed-badge" hidden></span>

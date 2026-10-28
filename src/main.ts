@@ -240,6 +240,13 @@ function updateUi(force = false): void {
   const waterOn = state.nodes.some((n) => n.connected && n.type === 'feucht');
   $('#res-water').hidden = !waterOn;
   $('#res-water .v').textContent = fmt(state.res.water);
+  // Raten pro Sekunde wie bei den Nährstoffen; Wasser netto (Zufluss minus Verbrauch der Bäume)
+  $('#res-sugar .r').textContent = t('per_sec', { v: fmt(rates.sugar) });
+  const water = rates.waterIn - rates.waterUse;
+  const full = water > 0 && state.res.water >= mods(state).waterCap - 1e-6;
+  const wEl = $('#res-water .r');
+  wEl.textContent = full ? t('water_full') : t('per_sec', { v: `${water > 0 ? '+' : ''}${fmt(water)}` });
+  wEl.classList.toggle('neg', water < 0);
   $('#net').textContent =
     state.zone >= 2
       ? t('net_progress_z2', { c: connectedCount(state), goal: CONFIG.zone2.goal })

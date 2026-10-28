@@ -1,12 +1,13 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Version 1.0.5',
+  version: 'Version 1.0.6',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
   res_water: 'Wasser',
   per_sec: '{v}/s',
+  water_full: 'voll',
   net_progress: 'Netz {c}/{goal}',
   net_progress_z2: 'Wald {c}/{goal}',
   season_fruehling: 'Frühling · Fäden schneller',
