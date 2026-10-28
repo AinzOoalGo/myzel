@@ -1,7 +1,7 @@
 import type { Season } from '../core/config';
 
 /**
- * Sound und Musik – komplett im Browser erzeugt (Web Audio), ohne Audiodateien.
+ * Sound und Naturgeräusche – komplett im Browser erzeugt (Web Audio), ohne Audiodateien.
  * Dadurch gibt es keine Lizenzfragen und die Spieldatei bleibt klein.
  *
  * Effekte sind als „Rezepte“ (sfx) geschrieben, die einen beliebigen AudioContext bekommen.
@@ -13,7 +13,6 @@ type Out = AudioNode;
 
 /** Moll-Pentatonik – klingt in jeder Kombination ruhig */
 const PENTA = [0, 3, 5, 7, 10];
-const ROOT_BY_SEASON: Record<Season | 'none', number> = { none: 57, fruehling: 62, sommer: 60, herbst: 57, winter: 55 }; // MIDI
 
 export const midi = (m: number): number => 440 * 2 ** ((m - 69) / 12);
 const pentaNote = (root: number, step: number): number => root + PENTA[((step % 5) + 5) % 5]! + 12 * Math.floor(step / 5);
@@ -116,6 +115,63 @@ export const sfx = {
 };
 export type SfxName = keyof typeof sfx;
 
+/** Bausteine der Waldatmosphäre (ebenfalls offline testbar). */
+export const ambience = {
+  /** Ein Vogelruf: schnelle Tonhöhen-Sprünge, je nach Art anders. */
+  bird(ctx: Ctx, out: Out, t: number, kind = Math.floor(Math.random() * 3), pitch = 1) {
+    const chirp = (at: number, f0: number, f1: number, dur: number, peak: number) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f0 * pitch, at);
+      o.frequency.exponentialRampToValueAtTime(f1 * pitch, at + dur);
+      o.connect(env(ctx, out, at, 0.008, dur, peak));
+      o.start(at);
+      o.stop(at + dur + 0.05);
+    };
+    if (kind === 0) {
+      // Meise: „zi-zi-bä“
+      for (let i = 0; i < 3; i++) chirp(t + i * 0.16, 4200, 3600, 0.07, 0.05);
+      chirp(t + 0.5, 3000, 2600, 0.12, 0.045);
+    } else if (kind === 1) {
+      // Triller
+      const n = 6 + Math.floor(Math.random() * 6);
+      for (let i = 0; i < n; i++) chirp(t + i * 0.055, 3300, 4400, 0.035, 0.035);
+    } else {
+      // Amsel-artig: zwei weiche, tiefere Pfiffe
+      chirp(t, 1700, 2300, 0.22, 0.05);
+      chirp(t + 0.3, 2100, 1600, 0.28, 0.045);
+    }
+  },
+  /** Blätterrascheln: kurzes, gefiltertes Knistern */
+  rustle(ctx: Ctx, out: Out, t: number, strength = 1) {
+    const n = 3 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < n; i++) noise(ctx, out, t + Math.random() * 0.6, 0.05 + Math.random() * 0.12, 'bandpass', 2500 + Math.random() * 3000, 0.035 * strength, 1.5);
+  },
+  /** Grille (Sommer) */
+  cricket(ctx: Ctx, out: Out, t: number) {
+    for (let i = 0; i < 4; i++) tone(ctx, out, t + i * 0.09, 4700, 'sine', 0.004, 0.04, 0.018);
+  },
+  /** Wassertropfen (wenn eine Feuchtstelle verbunden ist) */
+  drip(ctx: Ctx, out: Out, t: number) {
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(1400 + Math.random() * 500, t);
+    o.frequency.exponentialRampToValueAtTime(500, t + 0.09);
+    o.connect(env(ctx, out, t, 0.003, 0.12, 0.05));
+    o.start(t);
+    o.stop(t + 0.2);
+  },
+};
+
+/** Was gerade im Wald zu hören ist – Jahreszeit und Netzgröße bestimmen die Mischung. */
+const MIX: Record<Season | 'none', { birds: number; rustle: number; crickets: number; wind: number }> = {
+  none: { birds: 0.6, rustle: 0.5, crickets: 0, wind: 0.6 },
+  fruehling: { birds: 1, rustle: 0.4, crickets: 0, wind: 0.5 },
+  sommer: { birds: 0.6, rustle: 0.3, crickets: 1, wind: 0.4 },
+  herbst: { birds: 0.3, rustle: 1, crickets: 0, wind: 0.8 },
+  winter: { birds: 0, rustle: 0.15, crickets: 0, wind: 1 },
+};
+
 /** Steuert Effekte, Regen-Rauschen und die generative Musik. */
 export class Audio {
   private ctx: AudioContext | null = null;
@@ -124,9 +180,9 @@ export class Audio {
   private musicBus!: GainNode;
   private delay!: DelayNode;
   private rainGain: GainNode | null = null;
-  private drone: { gain: GainNode; oscs: OscillatorNode[]; filter: BiquadFilterNode } | null = null;
-  private nextNote = 0;
-  private step = 0;
+  private wind: { gain: GainNode; lowF: BiquadFilterNode; highF: BiquadFilterNode; highGain: GainNode } | null = null;
+  private nextEvent = 0;
+  private water = false;
   private lastTap = 0;
   private intensity = 0; // 0..1, wächst mit dem Netz
   private season: Season | null = null;
@@ -170,14 +226,14 @@ export class Audio {
     this.delay.connect(wet);
     wet.connect(this.musicBus);
     this.applyVolumes();
-    this.startMusic();
+    this.startAmbience();
   }
 
   applyVolumes(): void {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     this.sfxBus.gain.setTargetAtTime(this.sfxVolume, t, 0.05);
-    this.musicBus.gain.setTargetAtTime(this.musicVolume * 0.6, t, 0.3);
+    this.musicBus.gain.setTargetAtTime(this.musicVolume * 1.5, t, 0.3);
   }
 
   suspend(): void {
@@ -229,75 +285,97 @@ export class Audio {
     }
   }
 
-  /** Musik wird mit wachsendem Netz voller. */
-  setIntensity(connected: number): void {
+  /** Der Wald wird mit wachsendem Netz lebendiger. */
+  setIntensity(connected: number, hasWater = false): void {
     this.intensity = Math.max(0, Math.min(1, connected / 40));
-    if (this.drone && this.ctx) this.drone.filter.frequency.setTargetAtTime(350 + this.intensity * 900, this.ctx.currentTime, 2);
+    this.water = hasWater;
   }
 
   setSeason(s: Season | null): void {
     if (s === this.season) return;
     this.season = s;
-    this.retuneDrone();
+    this.applyWind();
   }
 
-  private root(): number {
-    return ROOT_BY_SEASON[this.season ?? 'none'];
+  private mix() {
+    return MIX[this.season ?? 'none'];
   }
 
-  private retuneDrone(): void {
-    if (!this.drone || !this.ctx) return;
+  private applyWind(): void {
+    if (!this.wind || !this.ctx) return;
     const t = this.ctx.currentTime;
-    const r = this.root() - 24;
-    this.drone.oscs.forEach((o, i) => o.frequency.setTargetAtTime(midi(r + (i === 2 ? 7 : 0)) * (i === 1 ? 1.004 : 1), t, 3));
+    const w = this.mix().wind;
+    this.wind.gain.gain.setTargetAtTime(0.11 * w, t, 3);
+    this.wind.highGain.gain.setTargetAtTime(0.05 * w, t, 3);
   }
 
-  private startMusic(): void {
+  /** Wind: zwei Rauschschichten, deren Filter langsam „atmen“ – das klingt nach Böen. */
+  private startAmbience(): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    // Klangteppich: drei leise, leicht verstimmte Oszillatoren durch einen Tiefpass
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 350;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx);
+    src.loop = true;
+    const lowF = ctx.createBiquadFilter();
+    lowF.type = 'lowpass';
+    lowF.frequency.value = 380;
     const gain = ctx.createGain();
     gain.gain.value = 0.0001;
-    gain.gain.setTargetAtTime(0.05, ctx.currentTime, 4);
-    filter.connect(gain);
+    src.connect(lowF);
+    lowF.connect(gain);
     gain.connect(this.musicBus);
-    const oscs = [0, 1, 2].map((i) => {
+    const highF = ctx.createBiquadFilter();
+    highF.type = 'bandpass';
+    highF.frequency.value = 1100;
+    highF.Q.value = 0.7;
+    const highGain = ctx.createGain();
+    highGain.gain.value = 0.0001;
+    src.connect(highF);
+    highF.connect(highGain);
+    highGain.connect(this.musicBus);
+    // langsame Modulation (LFOs) für Böen
+    const lfo = (freq: number, depth: number, target: AudioParam) => {
       const o = ctx.createOscillator();
-      o.type = i === 2 ? 'triangle' : 'sawtooth';
-      o.connect(filter);
+      o.frequency.value = freq;
+      const d = ctx.createGain();
+      d.gain.value = depth;
+      o.connect(d);
+      d.connect(target);
       o.start();
-      return o;
-    });
-    this.drone = { gain, oscs, filter };
-    this.retuneDrone();
-    this.nextNote = ctx.currentTime + 1;
+    };
+    lfo(0.07, 160, lowF.frequency);
+    lfo(0.045, 450, highF.frequency);
+    src.start();
+    this.wind = { gain, lowF, highF, highGain };
+    this.applyWind();
+    this.nextEvent = ctx.currentTime + 2;
     window.setInterval(() => this.schedule(), 250);
   }
 
-  /** Vorausplanung der nächsten Töne (stabiler als setTimeout pro Ton). */
+  /** Vögel, Rascheln, Grillen, Tropfen – zufällig verteilt, nie aufdringlich. */
   private schedule(): void {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running' || this.musicVolume <= 0) return;
-    while (this.nextNote < ctx.currentTime + 0.6) {
-      const t = this.nextNote;
-      const r = this.root();
-      // Schicht 1: langsame Töne – immer
-      this.step += Math.random() < 0.5 ? 1 : -1;
-      this.step = Math.max(-3, Math.min(8, this.step));
-      const n = midi(pentaNote(r, this.step));
-      tone(ctx, this.musicBus, t, n, 'sine', 0.03, 2.4, 0.07);
-      tone(ctx, this.delay, t, n, 'sine', 0.03, 1.2, 0.04);
-      // Schicht 2: hohe Funkel-Töne ab mittlerem Netz
-      if (this.intensity > 0.3 && Math.random() < this.intensity * 0.6) {
-        const h = midi(pentaNote(r + 12, Math.floor(Math.random() * 8)));
-        tone(ctx, this.delay, t + 0.4 + Math.random() * 0.6, h, 'sine', 0.01, 0.8, 0.035);
+    while (this.nextEvent < ctx.currentTime + 0.6) {
+      const t = this.nextEvent;
+      const m = this.mix();
+      const life = 0.4 + this.intensity * 0.6;
+      const r = Math.random();
+      if (r < 0.45 * m.birds * life) {
+        // Vögel klingen leicht entfernt: etwas Echo dazu
+        const kind = Math.floor(Math.random() * 3);
+        const pitch = 0.9 + Math.random() * 0.25;
+        ambience.bird(ctx, this.musicBus, t, kind, pitch);
+        ambience.bird(ctx, this.delay, t, kind, pitch);
+      } else if (r < 0.45 * m.birds * life + 0.35 * m.rustle) {
+        ambience.rustle(ctx, this.musicBus, t, 0.6 + Math.random() * 0.6);
+      } else if (m.crickets && r < 0.9) {
+        for (let i = 0; i < 3; i++) ambience.cricket(ctx, this.musicBus, t + i * 0.6);
+      } else if (this.water && r > 0.9) {
+        ambience.drip(ctx, this.delay, t);
+        ambience.drip(ctx, this.musicBus, t);
       }
-      // Schicht 3: tiefer Puls bei großem Netz
-      if (this.intensity > 0.65 && Math.random() < 0.5) tone(ctx, this.musicBus, t, midi(r - 12), 'triangle', 0.08, 1.4, 0.06);
-      this.nextNote += 2 + Math.random() * 2.5 - this.intensity;
+      this.nextEvent += 2.5 + Math.random() * (7 - this.intensity * 3);
     }
   }
 }

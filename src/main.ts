@@ -238,7 +238,7 @@ function updateUi(force = false): void {
       : t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
   const evA = state.events.active;
   audio.setRain(!!evA && evA.type === 'regen' && evA.until > state.stats.playSeconds);
-  audio.setIntensity(connectedCount(state));
+  audio.setIntensity(connectedCount(state), state.nodes.some((n) => n.connected && n.type === 'feucht'));
   audio.setSeason(season(state));
   const sp = speed();
   $('#speed-badge').hidden = sp === 1;
