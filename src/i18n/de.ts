@@ -1,7 +1,7 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Version 1.1',
+  version: 'Version 1.1.1',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
@@ -258,6 +258,7 @@ export const de = {
   dev_on: 'Entwicklermodus an – Tempo-Regler freigeschaltet',
   dev_off: 'Entwicklermodus aus',
   center: 'Zentrieren',
+  origin: 'Ursprung',
   export: 'Spielstand exportieren',
   export_hint: 'Diesen Text sicher aufbewahren, um den Spielstand später wiederherzustellen.',
   copy: 'Kopieren',

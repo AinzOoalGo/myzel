@@ -311,6 +311,8 @@ function updateUi(force = false): void {
   lockedEl.hidden = !lockKey;
   if (lockKey) lockedEl.textContent = t(lockKey);
   $('#btn-center').hidden = !renderer.userMoved || !cardEl.hidden;
+  // „Ursprung“ erst ab Zone 2 – vorher ist der Startpunkt ohnehin immer im Bild
+  $('#btn-origin').hidden = state.zone < 2 || !cardEl.hidden;
   const h = hint();
   hintEl.textContent = h;
   hintEl.hidden = !h;
@@ -634,6 +636,7 @@ canvas.addEventListener(
   { passive: false },
 );
 $('#btn-center').addEventListener('click', () => renderer.resetView());
+$('#btn-origin').addEventListener('click', () => renderer.focusOrigin());
 // Tastatur: Leertaste/Enter auf dem Spielfeld = Tippen (Barrierefreiheit, Desktop)
 canvas.addEventListener('keydown', (e) => {
   if (e.key !== ' ' && e.key !== 'Enter') return;
@@ -905,6 +908,7 @@ $('#title').textContent = t('title');
 canvas.setAttribute('aria-label', t('canvas_label'));
 $('#res-n .l').textContent = t('res_n');
 $('#btn-center').textContent = `⌖ ${t('center')}`;
+$('#btn-origin').textContent = `⌂ ${t('origin')}`;
 $('#res-sugar .l').textContent = t('res_sugar');
 $('#res-water .l').textContent = t('res_water');
 $('#res-spores .l').textContent = t('res_spores');

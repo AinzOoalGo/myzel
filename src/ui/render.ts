@@ -1,4 +1,4 @@
-import type { NodeType } from '../core/config';
+import { CONFIG, type NodeType } from '../core/config';
 import { computeRates, findSource, growthSpeed, reach, season, type GameState } from '../core/game';
 import type { MapNode } from '../core/map';
 import { createRng } from '../core/rng';
@@ -203,6 +203,14 @@ export class Renderer {
     return Math.abs(this.userZoom - 1) > 0.02 || Math.hypot(this.userPan.x, this.userPan.y) > 4;
   }
 
+  /** Zum Startpunkt (Spore) springen, nah genug, dass man die Knoten gut sieht. */
+  focusOrigin(): void {
+    this.userZoom = Math.max(1, 1.2 / Math.max(this.auto.scale, 1e-6));
+    this.userPan.x = -this.auto.x;
+    this.userPan.y = -this.auto.y;
+    this.clampPan();
+  }
+
   resetView(): void {
     this.userZoom = 1;
     this.userPan = { x: 0, y: 0 };
@@ -216,7 +224,9 @@ export class Renderer {
 
   zoomAt(factor: number, sx: number, sy: number): void {
     const before = this.toWorld(sx, sy);
-    this.userZoom = Math.max(0.5, Math.min(4, this.userZoom * factor));
+    // Grenze als echte Bildgröße statt als Vielfaches: so kommt man in jeder Zone bis ganz nah an den Ursprung
+    const maxZoom = Math.max(4, 2.5 / Math.max(this.auto.scale, 1e-6));
+    this.userZoom = Math.max(0.5, Math.min(maxZoom, this.userZoom * factor));
     // Kamera sofort anpassen, damit der Punkt unter dem Finger bleibt
     this.cam.scale = this.auto.scale * this.userZoom;
     const after = this.toWorld(sx, sy);
@@ -227,8 +237,10 @@ export class Renderer {
     this.clampPan();
   }
 
+  /** Wie weit man verschieben darf: so weit, wie die Karte der aktuellen Zone reicht. */
+  panLimit = 900;
   private clampPan(): void {
-    const lim = 900;
+    const lim = this.panLimit;
     this.userPan.x = Math.max(-lim, Math.min(lim, this.userPan.x));
     this.userPan.y = Math.max(-lim, Math.min(lim, this.userPan.y));
   }
@@ -406,6 +418,7 @@ export class Renderer {
 
   draw(s: GameState, dt: number, time: number): void {
     this.zoneNow = s.zone;
+    this.panLimit = s.zone >= 3 ? CONFIG.zone3.outerRadius : s.zone >= 2 ? CONFIG.zone2.outerRadius : CONFIG.map.radius;
     this.watchPerformance(dt);
     this.refresh(s);
     this.updateCamera(s, dt);

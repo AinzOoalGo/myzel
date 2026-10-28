@@ -92,7 +92,8 @@
 
       #season { position: absolute; left: 10px; bottom: 10px; background: rgba(29,25,20,.85); border: 1px solid var(--line);
         border-radius: 999px; padding: 6px 12px; font-size: 12px; color: var(--quiet); pointer-events: none; }
-      #btn-center { position: absolute; right: 10px; bottom: 10px; background: rgba(29,25,20,.9); color: var(--ink);
+      #view-btns { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+      #view-btns button { background: rgba(29,25,20,.9); color: var(--ink);
         border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
       #sheet { background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column;
         padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); }
@@ -196,7 +197,10 @@
         <canvas id="cv" tabindex="0" role="application"></canvas>
         <div id="hint" hidden role="status" aria-live="polite"></div>
         <div id="season" hidden></div>
-        <button id="btn-center" hidden>⌖ Zentrieren</button>
+        <div id="view-btns">
+          <button id="btn-origin">⌂ Ursprung</button>
+          <button id="btn-center" hidden>⌖ Zentrieren</button>
+        </div>
         <div id="toast" hidden role="status" aria-live="polite"></div>
       </main>
       <section id="sheet">
