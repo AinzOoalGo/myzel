@@ -1,3 +1,7 @@
+/** Wird vom Build gesetzt: true im Release, sonst false (siehe scripts/build.ts). */
+declare const __RELEASE__: boolean | undefined;
+export const RELEASE: boolean = typeof __RELEASE__ !== 'undefined' && __RELEASE__;
+
 /**
  * Zentrale Balancing-Konfiguration.
  * Alle Spielzahlen stehen hier – nirgendwo sonst im Code.
@@ -176,9 +180,9 @@ export const CONFIG = {
 
   /**
    * NUR ZUM TESTEN: Tempo-Regler (×1/×2/×5/×10) in den Einstellungen.
-   * Vor dem Release auf false setzen – dann ist er komplett verschwunden.
+   * Im Release-Build (bun scripts/build.ts --release) automatisch aus – dann ist er komplett verschwunden.
    */
-  testTools: true,
+  testTools: !RELEASE,
   testSpeeds: [1, 2, 5, 10] as number[],
 
   offlineCapSeconds: 12 * 3600,

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0" stop-color="#2a2016"/>
+      <stop offset="1" stop-color="#110d0a"/>
+    </radialGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff6e2"/>
+      <stop offset=".35" stop-color="#ffd68c" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#ff9f40" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g filter="url(#glow)" fill="none" stroke="#ffe3b0" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 256 C 230 220, 200 205, 170 160 S 130 110, 118 92" stroke-width="12"/>
+    <path d="M256 256 C 300 240, 330 215, 360 170 S 390 120, 402 104" stroke-width="11"/>
+    <path d="M256 256 C 262 300, 250 330, 268 372 S 300 410, 318 424" stroke-width="12"/>
+    <path d="M256 256 C 215 280, 180 300, 140 320 S 100 350, 92 372" stroke-width="10"/>
+    <path d="M170 160 C 150 165, 132 176, 112 182" stroke-width="6"/>
+    <path d="M360 170 C 380 186, 396 196, 420 200" stroke-width="6"/>
+    <path d="M268 372 C 240 386, 225 404, 206 420" stroke-width="6"/>
+    <path d="M140 320 C 150 345, 152 360, 170 386" stroke-width="5"/>
+    <path d="M300 236 C 320 260, 345 270, 372 284" stroke-width="5"/>
+  </g>
+  <g fill="#ffe9c4">
+    <circle cx="118" cy="92" r="11"/><circle cx="402" cy="104" r="11"/><circle cx="318" cy="424" r="11"/>
+    <circle cx="92" cy="372" r="10"/><circle cx="112" cy="182" r="7"/><circle cx="420" cy="200" r="7"/>
+    <circle cx="206" cy="420" r="7"/><circle cx="170" cy="386" r="6"/><circle cx="372" cy="284" r="6"/>
+  </g>
+  <circle cx="256" cy="256" r="90" fill="url(#core)"/>
+  <circle cx="256" cy="256" r="26" fill="#fff6e2"/>
+</svg>

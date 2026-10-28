@@ -1,4 +1,4 @@
-import { CONFIG, type Branch, type GenomeId, type UpgradeId } from './core/config';
+import { CONFIG, RELEASE, type Branch, type GenomeId, type UpgradeId } from './core/config';
 import { ACHIEVEMENTS, checkAchievements } from './core/achievements';
 import {
   buyGenome,
@@ -821,4 +821,8 @@ if (booted.welcome) {
   showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(booted.welcome.seconds), v: fmt(booted.welcome.gained) }));
 }
 save();
+// Nur in der Release-Version: offline spielbar und als App installierbar
+if (RELEASE && 'serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('Service Worker nicht registriert', err));
+}
 requestAnimationFrame(frame);

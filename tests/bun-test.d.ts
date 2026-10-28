@@ -23,9 +23,12 @@ declare module 'bun:test' {
   export function expect(v: unknown): Matchers;
 }
 
+interface BunFile {
+  text(): Promise<string>;
+}
 declare const Bun: {
   build(opts: Record<string, unknown>): Promise<{ success: boolean; outputs: { text(): Promise<string> }[]; logs: unknown[] }>;
-  file(path: string): { text(): Promise<string> };
-  write(path: string, data: string): Promise<number>;
+  file(path: string): BunFile;
+  write(path: string, data: string | BunFile): Promise<number>;
 };
 declare const process: { exit(code: number): never; argv: string[] };
