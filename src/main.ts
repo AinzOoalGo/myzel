@@ -181,6 +181,7 @@ function renderCard(): void {
   cardEl.querySelector('.card-yield')!.textContent = n.connected ? `${t('connected')} · ${nodeDetails(id)}` : nodeDetails(id);
   const btn = cardEl.querySelector<HTMLButtonElement>('.grow')!;
   const why = cardEl.querySelector<HTMLElement>('.card-why')!;
+  cardEl.classList.toggle('buyable', !n.connected && n.type !== 'spore' && n.type !== 'stein' && !!growthQuote(state, id));
   if (n.connected || n.type === 'spore') {
     btn.hidden = true;
     why.textContent = '';
@@ -310,15 +311,35 @@ type Tab = 'grow' | 'genome' | 'ach';
 let activeTab: Tab = 'grow';
 const TABS: Tab[] = ['grow', 'genome', 'ach'];
 
+let panelOpen = false;
+
+/** Liste auf- oder zuklappen. Zu = mehr Spielfeld. */
+function setPanel(open: boolean): void {
+  panelOpen = open;
+  $('#panel').hidden = !open;
+  for (const tb of TABS) {
+    const b = $(`#tabs [data-tab="${tb}"]`);
+    b.classList.toggle('on', open && tb === activeTab);
+    b.setAttribute('aria-expanded', String(open && tb === activeTab));
+  }
+  prefs.panelOpen = open;
+  savePrefs(prefs);
+}
+
 function setTab(tab: Tab): void {
   activeTab = tab;
-  for (const tb of TABS) {
-    $(`#tab-${tb}`).hidden = tb !== tab;
-    $(`#tabs [data-tab="${tb}"]`).classList.toggle('on', tb === tab);
-  }
+  for (const tb of TABS) $(`#tab-${tb}`).hidden = tb !== tab;
   if (tab === 'genome') buildGenome();
   if (tab === 'ach') buildAchievements();
-  $('#sheet').scrollTop = 0;
+  $('#panel').scrollTop = 0;
+  setPanel(panelOpen);
+}
+
+/** Knopf unten: gleicher Knopf nochmal = zuklappen, anderer Knopf = dorthin wechseln. */
+function onTabButton(tab: Tab): void {
+  if (panelOpen && activeTab === tab) return setPanel(false);
+  panelOpen = true;
+  setTab(tab);
 }
 
 function genomeAffordable(): boolean {
@@ -326,6 +347,8 @@ function genomeAffordable(): boolean {
 }
 
 function updateTabs(): void {
+  // Punkt am Knopf: dort gibt es gerade etwas zu kaufen (wichtig, wenn die Liste zu ist)
+  $('#tabs [data-tab="grow"] .badge').hidden = !UPGRADE_IDS.some((id) => canBuy(state, id));
   $('#tabs [data-tab="genome"] .badge').hidden = !(canPrestige(state) || genomeAffordable());
   $('#tabs [data-tab="ach"] .count').textContent = `${state.meta.achievements.length}/${ACHIEVEMENTS.length}`;
 }
@@ -416,6 +439,7 @@ function confirmPrestige(): void {
       syncShown();
       checkAchievements(state);
       save();
+      panelOpen = true;
       setTab('genome');
       updateUi(true);
       showMessage(t('prestige_done_title'), t('prestige_done_body'));
@@ -826,9 +850,10 @@ $('#res-spores .l').textContent = t('res_spores');
 for (const tb of TABS) {
   const b = $(`#tabs [data-tab="${tb}"]`);
   b.querySelector('.label')!.textContent = t(`tab_${tb}` as TextKey);
-  b.addEventListener('click', () => setTab(tb));
+  b.addEventListener('click', () => onTabButton(tb));
 }
 buildUpgrades();
+panelOpen = prefs.panelOpen;
 setTab('grow');
 checkAchievements(state);
 renderer.reducedMotion = prefs.reducedMotion;
