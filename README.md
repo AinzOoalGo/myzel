@@ -1,5 +1,9 @@
 # Myzel
 
+**▶ Jetzt spielen: https://ainzooalgo.github.io/myzel**
+
+Als App installieren: Link im Handy-Browser öffnen → Menü ⋮ → „Zum Startbildschirm hinzufügen“.
+
 Incremental-Spiel über ein wachsendes Pilzgeflecht. Stand: Version 1.0 (Release-Kandidat).
 
 | Befehl | Zweck |
