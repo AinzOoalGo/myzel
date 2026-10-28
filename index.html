@@ -56,9 +56,8 @@
         .res .v { font-size: 13px; }
         #net { font-size: 10px; }
         #btn-settings { width: 34px; height: 34px; font-size: 16px; }
-        #card { padding: 8px 10px; }
-        .card-desc { font-size: 12px; }
-        .grow { min-height: 40px; padding: 8px; font-size: 14px; }
+        #card .grow { padding: 8px 10px; font-size: 13px; }
+        .buy { min-width: 84px; }
       }
       #btn-settings { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 10px;
         width: 38px; height: 38px; font-size: 18px; cursor: pointer; }
@@ -100,29 +99,36 @@
       @media (prefers-reduced-motion: reduce) { #toast.show { animation: none; } }
       .small { font-size: 12px; color: var(--quiet); }
 
-      /* Infokarte in der Leiste: bleibt oben angeheftet, wenn die Liste gescrollt wird, und verdeckt nie das Spielfeld */
+      /* Infokarte in der Leiste: kompakt, Knopf rechts; bleibt oben angeheftet und verdeckt nie das Spielfeld */
       #card { position: sticky; top: -10px; z-index: 2; border: 1px solid var(--accent); border-radius: 12px;
-        padding: 10px 12px; margin: 0 0 8px; background: #241f18; box-shadow: 0 6px 16px rgba(0,0,0,.45); }
+        padding: 8px 10px; margin: 0 0 8px; background: #241f18; box-shadow: 0 6px 16px rgba(0,0,0,.45);
+        display: grid; grid-template-columns: 1fr auto; column-gap: 10px; align-items: center; }
+      #card > :not(.grow) { grid-column: 1; }
       .card-head { display: flex; align-items: center; gap: 8px; }
-      .card-head .dot { width: 12px; height: 12px; border-radius: 50%; }
-      .card-head .x { margin-left: auto; background: none; border: 0; color: var(--quiet); font-size: 22px; cursor: pointer; line-height: 1; }
-      .card-desc { color: var(--quiet); font-size: 13px; margin: 4px 0; }
-      .card-yield { font-size: 13px; margin-bottom: 8px; }
-      .card-why { font-size: 12px; color: var(--warn); margin-top: 6px; }
+      .card-head strong { font-size: 15px; }
+      .card-head .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+      .card-head .x { background: none; border: 0; color: var(--quiet); font-size: 20px; cursor: pointer; line-height: 1;
+        padding: 0 4px; margin-left: 2px; min-height: 0; }
+      .card-desc { color: var(--quiet); font-size: 12px; margin: 2px 0 0; }
+      .card-yield { font-size: 12px; color: var(--accent); margin: 2px 0 0; }
+      #card .grow { grid-column: 2; grid-row: 1 / span 3; width: auto; max-width: 52vw; min-height: 44px;
+        padding: 8px 18px; font-size: 14px; border-radius: 999px; line-height: 1.25; white-space: pre-line; min-width: 120px; }
+      .card-why { grid-column: 1 / span 2 !important; font-size: 12px; color: var(--warn); margin-top: 6px; }
       .card-why:empty { display: none; }
 
-      .up { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+      .up { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
       .up:last-child { border-bottom: 0; }
       .up-text { flex: 1; min-width: 0; }
-      .up-name { font-weight: 600; }
-      .up-name small { color: var(--quiet); font-weight: 400; margin-left: 4px; }
-      .up-desc { font-size: 12px; color: var(--quiet); }
+      .up-name { font-weight: 600; font-size: 14px; }
+      .up-name small { color: var(--quiet); font-weight: 400; margin-left: 4px; white-space: nowrap; }
+      .up-desc { font-size: 11.5px; color: var(--quiet); }
       #locked { font-size: 12px; color: var(--quiet); margin: 8px 0 0; }
 
       button { font: inherit; }
       .buy, .grow, .box button { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px;
         padding: 10px 12px; font-weight: 700; min-height: 44px; cursor: pointer; font-variant-numeric: tabular-nums; }
-      .buy { min-width: 108px; }
+      .buy { min-width: 96px; min-height: 40px; padding: 6px 12px; font-size: 13px; border-radius: 999px; white-space: nowrap; }
+      .buy.wide { white-space: normal; }
       .grow { width: 100%; }
       button:disabled { background: #3a332a; color: #857a6b; cursor: default; }
       button:not(:disabled):active { transform: scale(.97); }

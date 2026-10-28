@@ -1,7 +1,7 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Version 1.0.2',
+  version: 'Version 1.0.3',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
@@ -38,8 +38,8 @@ export const de = {
   desc_rivale: 'Kern eines fremden Pilzes. Erobere ihn, und all seine Knoten werden frei – mit Belohnung.',
   desc_owned: 'Von einem Konkurrenzpilz besetzt. Zurückerobern kostet mehr.',
   desc_rivale_beaten: 'Besiegter Konkurrenzpilz. Jetzt arbeitet er für dich.',
-  reclaim_btn: 'Zurückerobern · {cost}',
-  attack_btn: 'Kern angreifen · {cost}',
+  reclaim_btn: 'Zurückerobern\n{cost}',
+  attack_btn: 'Kern angreifen\n{cost}',
 
   yield_n: '+{v} Nährstoffe/s',
   yield_water: '+{v} Wasser/s',
@@ -48,7 +48,7 @@ export const de = {
   depleted: 'Erschöpft',
   connected: 'Verbunden',
 
-  grow_btn: 'Faden wachsen lassen · {cost}',
+  grow_btn: 'Wachsen\n{cost}',
   grow_busy: 'Es wächst schon ein Faden.',
   grow_unreachable: 'Zu weit weg oder durch Steine versperrt.',
   grow_cost: 'Noch {missing} Nährstoffe nötig.',
