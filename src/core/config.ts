@@ -8,12 +8,25 @@ export const RELEASE: boolean = typeof __RELEASE__ !== 'undefined' && __RELEASE_
  * Die Balancing-Simulation (scripts/simulate.ts) liest dieselben Werte.
  */
 
-export type NodeType = 'spore' | 'laub' | 'totholz' | 'feucht' | 'baum' | 'stein' | 'altbaum' | 'rivale';
+export type NodeType =
+  | 'spore'
+  | 'laub'
+  | 'totholz'
+  | 'feucht'
+  | 'baum'
+  | 'stein'
+  | 'altbaum'
+  | 'rivale'
+  | 'moor'
+  | 'mineral'
+  | 'hexenring';
+export type Zone = 1 | 2 | 3;
+export type Climate = 'tropen' | 'steppe' | 'taiga';
 export type Season = 'fruehling' | 'sommer' | 'herbst' | 'winter';
-export type UpgradeId = 'hyphen' | 'enzym' | 'frucht' | 'rhizo';
-export type GenomeId = 'z1' | 'z2' | 'z3' | 'z4' | 's1' | 's2' | 's3' | 's4' | 'p1' | 'p2' | 'p3' | 'p4';
-export type Branch = 'zersetzer' | 'symbiont' | 'pionier';
-export type EventType = 'regen' | 'duerre' | 'gold';
+export type UpgradeId = 'hyphen' | 'enzym' | 'frucht' | 'rhizo' | 'kristall' | 'fern';
+export type GenomeId = 'z1' | 'z2' | 'z3' | 'z4' | 's1' | 's2' | 's3' | 's4' | 'p1' | 'p2' | 'p3' | 'p4' | 'w1' | 'w2' | 'w3' | 'w4';
+export type Branch = 'zersetzer' | 'symbiont' | 'pionier' | 'wanderer';
+export type EventType = 'regen' | 'duerre' | 'gold' | 'wind';
 
 export interface GenomeDef {
   id: GenomeId;
@@ -22,11 +35,18 @@ export interface GenomeDef {
   cost: number; // Sporen
 }
 
+export interface Cost {
+  n: number;
+  sugar: number;
+  min: number; // Mineralien
+}
+
 export interface UpgradeDef {
   id: UpgradeId;
-  baseCost: { n: number; sugar: number };
+  baseCost: Cost;
   growth: number; // Kostenfaktor pro Stufe
-  requiresSugar: boolean; // erst sichtbar, wenn Zucker freigeschaltet ist
+  /** erst sichtbar, wenn die Ressource freigeschaltet ist */
+  unlock: 'none' | 'sugar' | 'minerals';
 }
 
 export const CONFIG = {
@@ -41,7 +61,19 @@ export const CONFIG = {
     /** Typ-Gewichte für zufällige Knoten außerhalb des Startbereichs. */
     weights: { laub: 40, totholz: 20, feucht: 11, baum: 13, stein: 16 } as Record<'laub' | 'totholz' | 'feucht' | 'baum' | 'stein', number>,
     /** Knotenradien in Welteinheiten (Darstellung + Kollision). */
-    radius_by_type: { spore: 14, laub: 9, totholz: 13, feucht: 11, baum: 16, stein: 18, altbaum: 30, rivale: 32 } as Record<NodeType, number>,
+    radius_by_type: {
+      spore: 14,
+      laub: 9,
+      totholz: 13,
+      feucht: 11,
+      baum: 16,
+      stein: 18,
+      altbaum: 30,
+      rivale: 32,
+      moor: 16,
+      mineral: 14,
+      hexenring: 18,
+    } as Record<NodeType, number>,
   },
 
   /** Zone 2 „Wald“: ein Ring um Zone 1, größerer Maßstab. Wird an die Karte angehängt, Zone-1-Knoten bleiben unverändert. */
@@ -60,6 +92,46 @@ export const CONFIG = {
     speedBonus: 2,
     /** Kostenanstieg je Knoten jenseits von unlockAt (statt costPerNode) */
     costPerNode: 1.12,
+  },
+
+  /**
+   * Zone 3 „Kontinent“: noch ein Ring, viel größerer Maßstab, drei Klimazonen.
+   * Ebenfalls angehängt – Zone 1 und 2 bleiben unverändert.
+   */
+  zone3: {
+    unlockAt: 60,
+    goal: 100,
+    innerRadius: 2800,
+    outerRadius: 6500,
+    nodeCount: 210,
+    minSpacing: 330,
+    sizeScale: 3.2,
+    weights: { laub: 26, totholz: 16, feucht: 6, moor: 8, baum: 9, altbaum: 8, mineral: 11, hexenring: 3, stein: 13 } as Record<
+      'laub' | 'totholz' | 'feucht' | 'moor' | 'baum' | 'altbaum' | 'mineral' | 'hexenring' | 'stein',
+      number
+    >,
+    rivals: 2,
+    rivalMinDist: 4500,
+    rivalReach: 650,
+    rivalMaxReach: 1600,
+    reachBonus: 420, // zusätzlich zur Zone-2-Reichweite
+    speedBonus: 2.5, // zusätzlich zum Zone-2-Tempo
+    costPerNode: 1.14,
+    /** Jenseits des Waldes wächst der Entfernungsbonus langsamer (sonst explodieren die Erträge) */
+    distanceScaleOuter: 1400,
+    /** Klima je Himmelsrichtung (Drittel des Kreises) */
+    climate: {
+      tropen: { yield: 1.5, growth: 1.2, water: 1 },
+      steppe: { yield: 1, growth: 1, water: 0.5, totholz: 1.6 },
+      taiga: { yield: 0.85, growth: 0.9, water: 1, noDrought: true },
+    },
+  },
+
+  /** neue Knoten in Zone 3 */
+  zone3Nodes: {
+    moor: { water: 1.0, nps: 0.15 },
+    mineral: { min: 0.4 }, // Mineralien/s (ohne Entfernungsbonus)
+    hexenring: { sporeBonus: 0.25 }, // +25 % Sporen beim nächsten Sporenflug
   },
 
   rivals: {
@@ -110,10 +182,12 @@ export const CONFIG = {
   waterCap: 100,
 
   upgrades: [
-    { id: 'hyphen', baseCost: { n: 15, sugar: 0 }, growth: 1.3, requiresSugar: false },
-    { id: 'enzym', baseCost: { n: 60, sugar: 0 }, growth: 1.3, requiresSugar: false },
-    { id: 'frucht', baseCost: { n: 120, sugar: 4 }, growth: 1.22, requiresSugar: true },
-    { id: 'rhizo', baseCost: { n: 250, sugar: 10 }, growth: 1.3, requiresSugar: true },
+    { id: 'hyphen', baseCost: { n: 15, sugar: 0, min: 0 }, growth: 1.3, unlock: 'none' },
+    { id: 'enzym', baseCost: { n: 60, sugar: 0, min: 0 }, growth: 1.3, unlock: 'none' },
+    { id: 'frucht', baseCost: { n: 120, sugar: 4, min: 0 }, growth: 1.22, unlock: 'sugar' },
+    { id: 'rhizo', baseCost: { n: 250, sugar: 10, min: 0 }, growth: 1.3, unlock: 'sugar' },
+    { id: 'kristall', baseCost: { n: 0, sugar: 0, min: 40 }, growth: 1.55, unlock: 'minerals' },
+    { id: 'fern', baseCost: { n: 0, sugar: 0, min: 25 }, growth: 1.7, unlock: 'minerals' },
   ] as UpgradeDef[],
 
   effects: {
@@ -122,6 +196,8 @@ export const CONFIG = {
     fruchtNps: 1.5, // Nährstoffe/s pro Fruchtkörper
     rhizoCost: 0.9, // Fadenkosten × 0.9 pro Stufe
     rhizoSpeed: 0.25, // +25 % Wachstumstempo pro Stufe
+    kristallGlobal: 0.25, // +25 % auf alle Nährstoffe pro Stufe (multiplikativ)
+    fernReach: 120, // +120 Reichweite pro Stufe
   },
 
   /** Ziel des Prototyps (Zone 1). */
@@ -149,6 +225,10 @@ export const CONFIG = {
     { id: 'p2', branch: 'pionier', tier: 2, cost: 3 },
     { id: 'p3', branch: 'pionier', tier: 3, cost: 6 },
     { id: 'p4', branch: 'pionier', tier: 4, cost: 12 },
+    { id: 'w1', branch: 'wanderer', tier: 1, cost: 15 },
+    { id: 'w2', branch: 'wanderer', tier: 2, cost: 30 },
+    { id: 'w3', branch: 'wanderer', tier: 3, cost: 50 },
+    { id: 'w4', branch: 'wanderer', tier: 4, cost: 80 },
   ] as GenomeDef[],
 
   genomeEffects: {
@@ -165,16 +245,21 @@ export const CONFIG = {
     p2Reach: 40, // +40 Reichweite
     p3Speed: 2, // Fäden ×2 Tempo
     p4Start: 1000, // Startvorrat pro Durchlauf
+    w1Wind: 2, // Sporenwind doppelt so oft und 50 % länger
+    w2Min: 2, // Mineralien ×2
+    w3Hex: 2, // Hexenringe wirken doppelt
+    w4PerNode: 0.01, // +1 % Nährstoffe je verbundenem Knoten
   },
 
   events: {
     firstAt: 150, // Sekunden Spielzeit bis zum ersten Ereignis
     minGap: 180,
     maxGap: 420,
-    weights: { regen: 45, duerre: 25, gold: 30 } as Record<EventType, number>,
+    weights: { regen: 45, duerre: 25, gold: 30, wind: 25 } as Record<EventType, number>,
     regen: { duration: 60, growth: 2, water: 3 },
     duerre: { duration: 90, water: 0.3, offlineWater: 0.65 },
     gold: { duration: 12, rewardSeconds: 60, minReward: 50 },
+    wind: { duration: 40, cost: 0.25 }, // nur ab Zone 3: Fäden kosten nur ein Viertel
   },
 
   /** +2 % Nährstoffe je freigeschaltetem Erfolg */

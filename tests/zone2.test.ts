@@ -134,8 +134,8 @@ describe('Konkurrenzpilze', () => {
     s.zone2Since = 0;
     for (const r of s.rivals) r.nextAt = 0;
     simulate(s, 3 * 3600, 1);
-    // jeder Rivale hat sich deutlich ausgebreitet, keiner bleibt bei einer Handvoll Knoten stehen
-    for (const r of s.rivals) expect(r.edges.length).toBeGreaterThan(20);
+    // jeder Wald-Rivale hat sich deutlich ausgebreitet, keiner bleibt bei einer Handvoll Knoten stehen
+    for (const r of s.rivals.filter((x) => s.nodes[x.core]!.zone === 2)) expect(r.edges.length).toBeGreaterThan(20);
   });
   it('besetzen nie Knoten des Spielers oder sein aktuelles Ziel', () => {
     const s = newGame(1);
@@ -220,7 +220,7 @@ describe('Spielstand v3', () => {
   it('lädt weiterhin einen v1-Spielstand', () => {
     const s = deserialize(v1Save);
     expect(s.zone).toBe(1);
-    expect(s.rivals.length).toBe(CONFIG.zone2.rivals);
+    expect(s.rivals.length).toBe(CONFIG.zone2.rivals + CONFIG.zone3.rivals);
     expect(s.edges.length).toBe(18);
   });
 });

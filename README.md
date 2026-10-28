@@ -4,7 +4,7 @@
 
 Als App installieren: Link im Handy-Browser öffnen → Menü ⋮ → „Zum Startbildschirm hinzufügen“.
 
-Incremental-Spiel über ein wachsendes Pilzgeflecht. Stand: Version 1.0 (Release-Kandidat).
+Incremental-Spiel über ein wachsendes Pilzgeflecht. Stand: Version 1.1 (Zone 3 „Kontinent“).
 
 | Befehl | Zweck |
 | --- | --- |

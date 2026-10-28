@@ -60,6 +60,22 @@
         #card .grow { padding: 6px 12px; font-size: 13px; }
         #card .grow .lbl { display: none; }
         #tabs .count { display: none; }
+        /* sehr schmal: Sporen nur im Genom-Tab, damit die Kopfzeile nicht überläuft */
+        #res-spores { display: none !important; }
+        header { gap: 2px; padding-left: 6px; padding-right: 6px; }
+        .res { padding: 2px 3px; border-left: 0; }
+        .res .l { font-size: 9.5px; }
+        .res .v { font-size: 12.5px; }
+        .res .r { font-size: 10px; }
+        #net { font-size: 9.5px; }
+        #btn-settings { width: 30px; height: 30px; font-size: 14px; flex: none; }
+        #speed-badge { font-size: 9.5px; padding: 2px 4px; }
+      }
+      @media (max-width: 340px) {
+        /* winzige Handys: lieber eine zweite Zeile als abgeschnittene Knöpfe */
+        header { flex-wrap: wrap; row-gap: 2px; }
+        #net { order: 10; flex-basis: 100%; text-align: left; margin-left: 4px; }
+        #btn-settings { margin-left: auto; }
         #tabs button { font-size: 12px; }
         .buy { min-width: 84px; }
       }
@@ -171,6 +187,7 @@
         <div class="res" id="res-sugar" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
         <div class="res" id="res-water" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
         <div class="res" id="res-spores" hidden><span class="l"></span><span class="v">0</span></div>
+        <div class="res" id="res-min" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
         <span id="net"></span>
         <span id="speed-badge" hidden></span>
         <button id="btn-settings" aria-label="Einstellungen">⚙</button>

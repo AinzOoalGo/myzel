@@ -18,6 +18,9 @@ export const NODE_COLORS: Record<NodeType, string> = {
   stein: '#86817a',
   altbaum: '#3f9a57',
   rivale: '#a77be8',
+  moor: '#3f8a80',
+  mineral: '#7fd6e0',
+  hexenring: '#e2b8ff',
 };
 
 const GLOW_WARM = 'rgba(255,196,120,';
@@ -399,7 +402,10 @@ export class Renderer {
 
   // ---------- Zeichnen ----------
 
+  private zoneNow = 1;
+
   draw(s: GameState, dt: number, time: number): void {
+    this.zoneNow = s.zone;
     this.watchPerformance(dt);
     this.refresh(s);
     this.updateCamera(s, dt);
@@ -417,6 +423,7 @@ export class Renderer {
 
     // Steine und unverbundene Knoten unter den Fäden
     for (const n of this.visible) if (!n.connected) this.drawNode(n, time, px);
+    this.flushRings(time, px);
 
     // Fäden: additive Mischung ergibt das Leuchten
     ctx.globalCompositeOperation = 'lighter';
@@ -470,6 +477,7 @@ export class Renderer {
     // verbundene Knoten über den Fäden
     ctx.globalCompositeOperation = 'source-over';
     for (const n of this.visible) if (n.connected) this.drawNode(n, time, px);
+    this.flushRings(time, px);
 
     // Auswahlring
     if (this.selected !== null) {
@@ -536,6 +544,18 @@ export class Renderer {
     } else if (drought) {
       ctx.fillStyle = 'rgba(190,120,40,0.10)';
       ctx.fillRect(0, 0, this.w, this.h);
+    } else if (ev?.type === 'wind' && ev.until > s.stats.playSeconds && !this.reducedMotion) {
+      // Sporenwind: helle Böen-Streifen ziehen über das Bild
+      ctx.strokeStyle = 'rgba(255,240,210,0.18)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let i = 0; i < 26; i++) {
+        const y = (i * 61.7) % this.h;
+        const x = ((i * 137.1 + time * 380) % (this.w + 160)) - 80;
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + 30, y - 6, x + 70, y);
+      }
+      ctx.stroke();
     }
     const se = season(s);
     if (se) {
@@ -636,20 +656,30 @@ export class Renderer {
     }
   }
 
-  private pathCache = new WeakMap<Hypha, { main: Path2D; hairs: Path2D }>();
-  private paths(h: Hypha): { main: Path2D; hairs: Path2D } {
-    let c = this.pathCache.get(h);
+  /**
+   * Pfade je Detailstufe zwischenspeichern. Weit herausgezoomt hat ein Faden auf dem Bildschirm
+   * nur wenige Pixel – dann reicht jeder 4. oder 16. Punkt. Das spart sehr viel Zeichenarbeit.
+   */
+  private pathCache = new WeakMap<Hypha, Map<number, { main: Path2D; hairs: Path2D }>>();
+  private paths(h: Hypha, px: number): { main: Path2D; hairs: Path2D } {
+    // Punktabstand im Faden ≈ 5 Welteinheiten; Ziel: Segmente von mind. ~3 Bildschirmpixeln
+    const stride = 2 ** Math.max(0, Math.min(5, Math.floor(Math.log2(Math.max(1, (3 * px) / 5)))));
+    let byLod = this.pathCache.get(h);
+    if (!byLod) this.pathCache.set(h, (byLod = new Map()));
+    let c = byLod.get(stride);
     if (!c) {
       const toP = (p: Path) => {
         const p2 = new Path2D();
         p2.moveTo(p.xs[0]!, p.ys[0]!);
-        for (let i = 1; i < p.xs.length; i++) p2.lineTo(p.xs[i]!, p.ys[i]!);
+        const last = p.xs.length - 1;
+        for (let i = stride; i < last; i += stride) p2.lineTo(p.xs[i]!, p.ys[i]!);
+        p2.lineTo(p.xs[last]!, p.ys[last]!);
         return p2;
       };
       const hairs = new Path2D();
       for (const hair of h.hairs) hairs.addPath(toP(hair.path));
       c = { main: toP(h.main), hairs };
-      this.pathCache.set(h, c);
+      byLod.set(stride, c);
     }
     return c;
   }
@@ -672,9 +702,9 @@ export class Renderer {
       const key = Math.round(w * 100) * (dim ? -1 : 1);
       let b = buckets.get(key);
       if (!b) buckets.set(key, (b = new Path2D()));
-      const c = this.paths(h);
+      const c = this.paths(h, px);
       b.addPath(c.main);
-      if (this.quality === 'high' && h.main.total >= 40 * px) {
+      if (this.quality === 'high' && !rival && h.main.total >= 40 * px) {
         hairs.addPath(c.hairs);
         anyHairs = true;
       }
@@ -682,10 +712,18 @@ export class Renderer {
     for (const [key, path] of buckets) {
       const width = Math.abs(key) / 100;
       const b = key < 0 ? boost * 0.45 : boost;
-      if (this.quality === 'high') {
+      // Rivalen ohne breiten Schein: spart viel Zeichenzeit, und sie wirken kühler als das eigene Netz
+      if (this.quality === 'high' && !rival) {
         ctx.strokeStyle = `${glow}${0.07 * b})`;
         ctx.lineWidth = width * 5 + 4 * px;
         ctx.stroke(path);
+      }
+      if (rival) {
+        // Rivalen: eine einzige, etwas breitere Linie – deutlich günstiger zu zeichnen
+        ctx.strokeStyle = `${core}${0.6 * b})`;
+        ctx.lineWidth = Math.max(1.3 * px, width);
+        ctx.stroke(path);
+        continue;
       }
       ctx.strokeStyle = `${glow}${(this.quality === 'high' ? 0.16 : 0.24) * b})`;
       ctx.lineWidth = width * 2.2;
@@ -749,12 +787,15 @@ export class Renderer {
     const alpha = n.connected ? 1 : (this.sightAlpha.get(n.id) ?? 1) * (n.type === 'stein' ? 0.85 : 0.55);
     const rng = createRng(n.id * 9301 + 49297);
     // Zone-2-Knoten beim Herauszoomen nie kleiner als ein paar Pixel; Zone 1 darf winzig werden
-    const r = n.zone === 2 ? Math.max(n.r, 5 * px) : n.r;
+    // nur die äußerste offene Zone bekommt eine Mindestgröße – innere Zonen dürfen beim Herauszoomen klein werden
+    const r = n.zone >= 2 && n.zone === this.zoneNow ? Math.max(n.r, 5 * px) : n.r;
     // fast unsichtbar klein: als Punkt zeichnen und fertig (spart viel Zeit beim Herauszoomen)
-    if (r < 1.5 * px && !n.connected) {
+    // sehr klein auf dem Bildschirm: nur ein Punkt (spart beim Herauszoomen viel Zeichenarbeit)
+    if (r < 2.5 * px && n.type !== 'spore') {
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = NODE_COLORS[n.type];
-      ctx.fillRect(n.x - px, n.y - px, 2 * px, 2 * px);
+      ctx.fillStyle = n.owner > 0 ? NODE_COLORS.rivale : NODE_COLORS[n.type];
+      const d = n.connected ? 2.6 * px : 2 * px;
+      ctx.fillRect(n.x - d / 2, n.y - d / 2, d, d);
       ctx.globalAlpha = 1;
       return;
     }
@@ -881,6 +922,84 @@ export class Renderer {
         ctx.fill();
         break;
       }
+      case 'moor': {
+        if (n.connected) {
+          ctx.globalCompositeOperation = 'lighter';
+          this.sprite(this.glowBlue, n.x, n.y, r * 4, 0.35);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.fillStyle = '#1f4a46';
+        ctx.beginPath();
+        ctx.ellipse(n.x, n.y, r * 1.2, r * 0.85, rng(), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = NODE_COLORS.moor;
+        ctx.beginPath();
+        ctx.ellipse(n.x - r * 0.2, n.y, r * 0.8, r * 0.55, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        // Schilf
+        ctx.strokeStyle = '#8a9a52';
+        ctx.lineWidth = Math.max(0.8 * px, r * 0.07);
+        for (let i = 0; i < 5; i++) {
+          const bx = n.x + (rng() - 0.5) * r * 1.6;
+          const by = n.y + (rng() - 0.2) * r * 0.8;
+          ctx.beginPath();
+          ctx.moveTo(bx, by);
+          ctx.lineTo(bx + (rng() - 0.5) * r * 0.3, by - r * (0.5 + rng() * 0.4));
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'mineral': {
+        if (n.connected) {
+          ctx.globalCompositeOperation = 'lighter';
+          this.sprite(this.glowBlue, n.x, n.y, r * 4.5, 0.4 + Math.sin(time * 2 + n.id) * 0.1);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.fillStyle = '#4b4a52';
+        ctx.beginPath();
+        ctx.ellipse(n.x, n.y + r * 0.3, r * 1.1, r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Kristalle
+        for (const [dx, h, w, col] of [[-0.45, 1.1, 0.35, '#5fb8c8'], [0.1, 1.5, 0.42, NODE_COLORS.mineral], [0.55, 0.9, 0.3, '#a7e8f0']] as const) {
+          const x = n.x + dx * r;
+          const y = n.y + r * 0.35;
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.moveTo(x - w * r, y);
+          ctx.lineTo(x - w * r * 0.6, y - h * r * 0.8);
+          ctx.lineTo(x, y - h * r);
+          ctx.lineTo(x + w * r * 0.6, y - h * r * 0.8);
+          ctx.lineTo(x + w * r, y);
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+      }
+      case 'hexenring': {
+        if (n.connected) {
+          ctx.globalCompositeOperation = 'lighter';
+          this.sprite(this.glowRival, n.x, n.y, r * 4, 0.35 + Math.sin(time * 1.3) * 0.1);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.strokeStyle = 'rgba(226,184,255,0.25)';
+        ctx.lineWidth = Math.max(px, r * 0.15);
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r * 0.85, 0, Math.PI * 2);
+        ctx.stroke();
+        // kleine Pilze im Kreis
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2;
+          const mx = n.x + Math.cos(a) * r * 0.85;
+          const my = n.y + Math.sin(a) * r * 0.85;
+          ctx.fillStyle = '#f3e3c8';
+          ctx.fillRect(mx - r * 0.04, my - r * 0.02, r * 0.08, r * 0.14);
+          ctx.fillStyle = NODE_COLORS.hexenring;
+          ctx.beginPath();
+          ctx.ellipse(mx, my - r * 0.03, r * 0.16, r * 0.1, 0, Math.PI, 0);
+          ctx.fill();
+        }
+        break;
+      }
       case 'baum': {
         if (n.connected) {
           ctx.globalCompositeOperation = 'lighter';
@@ -936,25 +1055,35 @@ export class Renderer {
       }
     }
     ctx.globalAlpha = 1;
-    if (n.owner > 0 && n.type !== 'rivale') {
-      ctx.strokeStyle = 'rgba(180,140,255,0.9)';
-      ctx.lineWidth = 2 * px;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r * 1.1 + 2 * px, 0, Math.PI * 2);
-      ctx.stroke();
+    // Ringe nur sammeln – gezeichnet werden sie gebündelt in einem Aufruf (flushRings)
+    if (n.owner > 0 && n.type !== 'rivale' && r >= 3 * px) {
+      const rr = r * 1.1 + 2 * px;
+      this.ownedRings.moveTo(n.x + rr, n.y);
+      this.ownedRings.arc(n.x, n.y, rr, 0, Math.PI * 2);
     }
-    // erreichbare Knoten: rotierender gestrichelter Ring
     if (this.reachable.has(n.id) && r >= 3 * px) {
-      ctx.setLineDash([4 * px, 4 * px]);
-      ctx.lineDashOffset = -time * 8 * px;
-      ctx.strokeStyle = 'rgba(255,236,200,0.85)';
-      ctx.lineWidth = 1.4 * px;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r * (n.type === 'totholz' ? 1.35 : 1.15) + 4 * px, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.lineDashOffset = 0;
+      const rr = r * (n.type === 'totholz' ? 1.35 : 1.15) + 4 * px;
+      this.reachRings.moveTo(n.x + rr, n.y);
+      this.reachRings.arc(n.x, n.y, rr, 0, Math.PI * 2);
     }
+  }
+
+  private ownedRings = new Path2D();
+  private reachRings = new Path2D();
+  private flushRings(time: number, px: number): void {
+    const { ctx } = this;
+    ctx.strokeStyle = 'rgba(180,140,255,0.9)';
+    ctx.lineWidth = 2 * px;
+    ctx.stroke(this.ownedRings);
+    ctx.setLineDash([4 * px, 4 * px]);
+    ctx.lineDashOffset = -time * 8 * px;
+    ctx.strokeStyle = 'rgba(255,236,200,0.85)';
+    ctx.lineWidth = 1.4 * px;
+    ctx.stroke(this.reachRings);
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    this.ownedRings = new Path2D();
+    this.reachRings = new Path2D();
   }
 
   /** Für die Anzeige der Wachstumsdauer. */

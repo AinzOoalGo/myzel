@@ -33,13 +33,20 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'gold_10', check: (s) => s.meta.lifetime.goldCaught >= 10 },
   { id: 'spore_1', check: (s) => s.meta.runs >= 1 },
   { id: 'spore_5', check: (s) => s.meta.runs >= 5 },
-  { id: 'genome_branch', check: (s) => ['z4', 's4', 'p4'].some((id) => s.meta.genome.includes(id as never)) },
+  { id: 'genome_branch', check: (s) => ['z4', 's4', 'p4', 'w4'].some((id) => s.meta.genome.includes(id as never)) },
   { id: 'genome_all', check: (s) => s.meta.genome.length >= CONFIG.genome.length },
   { id: 'zone2', check: (s) => s.zone >= 2 },
   { id: 'net_60', check: (s) => connectedCount(s) >= CONFIG.zone2.goal },
   { id: 'altbaum', check: (s) => countType(s, 'altbaum') >= 1 },
   { id: 'rival', check: (s) => s.meta.lifetime.rivalsBeaten >= 1 },
   { id: 'year', check: (s) => s.meta.lifetime.seasons === 0b1111 },
+  { id: 'zone3', check: (s) => s.zone >= 3 },
+  { id: 'net_100', check: (s) => connectedCount(s) >= CONFIG.zone3.goal },
+  { id: 'moor', check: (s) => countType(s, 'moor') >= 1 },
+  { id: 'hexenring', check: (s) => countType(s, 'hexenring') >= 1 },
+  { id: 'minerals_1k', check: (s) => s.meta.lifetime.minerals >= 1000 },
+  { id: 'wind', check: (s) => s.meta.lifetime.windSeen >= 1 },
+  { id: 'climates', check: (s) => new Set(s.nodes.filter((n) => n.connected && n.climate).map((n) => n.climate)).size === 3 },
 ];
 
 /** Prüft alle Erfolge, trägt neue ein und gibt deren IDs zurück. */

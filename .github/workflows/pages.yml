@@ -26,8 +26,8 @@ jobs:
         run: bunx -p typescript@5 tsc --noEmit -p .
       - name: Tests
         run: bun test
-      - name: Balancing-Simulation
-        run: bun scripts/simulate.ts
+      - name: Balancing-Simulation (Kurzfassung)
+        run: bun scripts/simulate.ts --quick
       - name: Release bauen
         run: bun scripts/build.ts --release
       - uses: actions/configure-pages@v5

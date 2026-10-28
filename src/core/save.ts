@@ -1,7 +1,7 @@
 import { type GenomeId, type UpgradeId } from './config';
 import { generateMap } from './map';
 import { connectedCount, mods, newGame, newMeta, simulate, type Edge, type EventsState, type GameState, type Growth, type Meta, type Rival } from './game';
-import { CONFIG } from './config';
+import { CONFIG, type Zone } from './config';
 
 /**
  * Spielstände sind versioniert. Bei jeder Formatänderung:
@@ -10,22 +10,22 @@ import { CONFIG } from './config';
  *  3. einen Test mit einem echten alten Spielstand hinzufügen
  * So gehen alte Spielstände bei Updates nie verloren.
  */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
-export interface SaveV3 {
-  v: 3;
+export interface SaveV4 {
+  v: 4;
   savedAt: number; // ms seit Epoche
   seed: number;
   connected: number[];
   edges: [number, number][];
   stocks: Record<string, number>; // nur geänderte Totholz-Vorräte
-  res: { n: number; sugar: number; water: number };
+  res: { n: number; sugar: number; water: number; minerals?: number };
   levels: Record<UpgradeId, number>;
   growth: Growth | null;
   stats: GameState['stats'];
   meta: Meta;
   events: EventsState;
-  zone: 1 | 2;
+  zone: Zone;
   zone2Since: number | null;
   /** Knoten-ID → Rivale (nur besetzte) */
   owners: Record<string, number>;
@@ -50,18 +50,20 @@ const MIGRATIONS: Record<number, (old: AnySave) => AnySave> = {
     const z2 = connected >= CONFIG.zone2.unlockAt;
     return { ...s, v: 3, zone: z2 ? 2 : 1, zone2Since: z2 ? num(stats.playSeconds) : null, owners: {}, rivals: [] };
   },
+  // v3 → v4: Zone 3, Mineralien, neue Upgrades. Neue Felder haben beim Lesen sichere Standardwerte.
+  3: (s) => ({ ...s, v: 4 }),
 };
 
 const num = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 
-export function serialize(s: GameState, now: number): SaveV3 {
+export function serialize(s: GameState, now: number): SaveV4 {
   const fresh = generateMap(s.seed);
   const stocks: Record<string, number> = {};
   for (const n of s.nodes) {
     if (n.type === 'totholz' && n.stock !== fresh[n.id]?.stock) stocks[n.id] = n.stock;
   }
   return {
-    v: 3,
+    v: 4,
     savedAt: now,
     seed: s.seed,
     connected: s.nodes.filter((n) => n.connected && n.type !== 'spore').map((n) => n.id),
@@ -80,7 +82,7 @@ export function serialize(s: GameState, now: number): SaveV3 {
   };
 }
 
-function migrate(raw: AnySave): SaveV3 {
+function migrate(raw: AnySave): SaveV4 {
   let cur = raw;
   while (cur.v < SAVE_VERSION) {
     const step = MIGRATIONS[cur.v];
@@ -88,10 +90,10 @@ function migrate(raw: AnySave): SaveV3 {
     cur = step(cur);
   }
   if (cur.v !== SAVE_VERSION) throw new Error(`Spielstand-Version ${cur.v} ist neuer als dieses Spiel`);
-  return cur as unknown as SaveV3;
+  return cur as unknown as SaveV4;
 }
 
-const GENOME_IDS = new Set<GenomeId>(['z1', 'z2', 'z3', 'z4', 's1', 's2', 's3', 's4', 'p1', 'p2', 'p3', 'p4']);
+const GENOME_IDS = new Set<GenomeId>(CONFIG.genome.map((g) => g.id));
 
 function readMeta(m: Partial<Meta> | undefined): Meta {
   const base = newMeta();
@@ -111,6 +113,8 @@ function readMeta(m: Partial<Meta> | undefined): Meta {
       playSeconds: num(lt.playSeconds),
       seasons: num(lt.seasons),
       rivalsBeaten: num(lt.rivalsBeaten),
+      minerals: num(lt.minerals),
+      windSeen: num(lt.windSeen),
     },
   };
 }
@@ -151,13 +155,20 @@ export function deserialize(raw: unknown): GameState {
     const core = nodes[r.core];
     if (core) core.owner = r.alive ? i + 1 : 0;
   });
-  const zone: 1 | 2 = d.zone === 2 ? 2 : 1;
+  const zone: Zone = d.zone === 3 ? 3 : d.zone === 2 ? 2 : 1;
   const state: GameState = {
     seed: num(d.seed),
     nodes,
     edges,
-    res: { n: num(d.res?.n), sugar: num(d.res?.sugar), water: num(d.res?.water) },
-    levels: { hyphen: num(lv.hyphen), enzym: num(lv.enzym), frucht: num(lv.frucht), rhizo: num(lv.rhizo) },
+    res: { n: num(d.res?.n), sugar: num(d.res?.sugar), water: num(d.res?.water), minerals: num(d.res?.minerals) },
+    levels: {
+      hyphen: num(lv.hyphen),
+      enzym: num(lv.enzym),
+      frucht: num(lv.frucht),
+      rhizo: num(lv.rhizo),
+      kristall: num(lv.kristall),
+      fern: num(lv.fern),
+    },
     growth: d.growth ?? null,
     stats: {
       totalN: num(d.stats?.totalN),
@@ -165,18 +176,21 @@ export function deserialize(raw: unknown): GameState {
       playSeconds: num(d.stats?.playSeconds),
       zoneDoneAt: d.stats?.zoneDoneAt ?? null,
       zone2DoneAt: d.stats?.zone2DoneAt ?? null,
+      zone3DoneAt: d.stats?.zone3DoneAt ?? null,
     },
     meta: readMeta(d.meta),
     events: { active: ev.active ?? null, golden: ev.golden ?? null, nextAt: num(ev.nextAt, 150), counter: num(ev.counter) },
     zone,
-    zone2Since: zone === 2 ? num(d.zone2Since, num(d.stats?.playSeconds)) : null,
+    zone2Since: zone >= 2 ? num(d.zone2Since, num(d.stats?.playSeconds)) : null,
     rivals,
   };
   // Sicherheitsnetz: Zone 2 freischalten, falls die Bedingung erfüllt ist
-  if (state.zone < 2 && connectedCount(state) >= CONFIG.zone2.unlockAt) {
+  const c = connectedCount(state);
+  if (state.zone < 2 && c >= CONFIG.zone2.unlockAt) {
     state.zone = 2;
     state.zone2Since = state.stats.playSeconds;
   }
+  if (state.zone === 2 && c >= CONFIG.zone3.unlockAt) state.zone = 3;
   return state;
 }
 

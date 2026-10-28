@@ -8,6 +8,12 @@ import {
   has,
   mods,
   nodeYield,
+  nodeWater,
+  nodeMinerals,
+  climateOf,
+  hexBonus,
+  mineralsUnlocked,
+  upgradeUnlocked,
   prestige,
   season,
   seasonLeft,
@@ -95,7 +101,7 @@ const lockedEl = $('#locked');
 const modalEl = $('#modal');
 const modalBox = $('#modal .box');
 
-const UPGRADE_IDS: UpgradeId[] = ['hyphen', 'enzym', 'frucht', 'rhizo'];
+const UPGRADE_IDS: UpgradeId[] = ['hyphen', 'enzym', 'frucht', 'rhizo', 'kristall', 'fern'];
 const upgradeRows = new Map<UpgradeId, { row: HTMLElement; level: HTMLElement; btn: HTMLButtonElement }>();
 
 function buildUpgrades(): void {
@@ -119,8 +125,12 @@ function buildUpgrades(): void {
   }
 }
 
-function costLabel(c: { n: number; sugar: number }): string {
-  return c.sugar > 0 ? `${fmt(c.n)} N · ${fmt(c.sugar)} Z` : `${fmt(c.n)} N`;
+function costLabel(c: { n: number; sugar: number; min: number }): string {
+  const parts: string[] = [];
+  if (c.n > 0) parts.push(`${fmt(c.n)} N`);
+  if (c.sugar > 0) parts.push(`${fmt(c.sugar)} Z`);
+  if (c.min > 0) parts.push(`${fmt(c.min)} M`);
+  return parts.join(' · ');
 }
 
 function nodeDetails(id: number): string {
@@ -134,10 +144,16 @@ function nodeDetails(id: number): string {
       if (n.connected && n.stock <= 0) return t('depleted');
       return `${t('yield_n', { v: fmt(nodeYield(state, { ...n, stock: Math.max(n.stock, 1) }, m)) })} · ${t('stock', { v: fmt(n.stock * m.stock * m.global) })}`;
     case 'feucht':
-      return t('yield_water', { v: fmt(CONFIG.nodes.feucht.water * b * m.water) });
+      return t('yield_water', { v: fmt(nodeWater(n, m)) });
+    case 'moor':
+      return `${t('yield_water', { v: fmt(nodeWater(n, m)) })} · ${t('yield_n', { v: fmt(nodeYield(state, n, m)) })}`;
+    case 'mineral':
+      return t('yield_min', { v: fmt(nodeMinerals(n, m)) });
+    case 'hexenring':
+      return t('yield_hex', { v: fmt(CONFIG.zone3Nodes.hexenring.sporeBonus * m.hex * 100) });
     case 'baum':
     case 'altbaum':
-      return t('yield_sugar', { v: fmt(CONFIG.nodes[n.type].sugar * b * m.sugar), w: fmt(CONFIG.nodes[n.type].waterUse) });
+      return t('yield_sugar', { v: fmt(CONFIG.nodes[n.type].sugar * b * m.sugar * climateOf(n).yield), w: fmt(CONFIG.nodes[n.type].waterUse) });
     case 'rivale':
       return n.connected ? t('yield_n', { v: fmt(nodeYield(state, n, m)) }) : '';
     default:
@@ -162,7 +178,9 @@ function renderCard(): void {
     cardEl.querySelector('strong')!.textContent = t(`node_${n.type}` as TextKey);
     const descKey: TextKey =
       n.type === 'rivale' && n.connected ? 'desc_rivale_beaten' : n.owner > 0 && n.type !== 'rivale' ? 'desc_owned' : (`desc_${n.type}` as TextKey);
-    cardEl.querySelector('.card-desc')!.textContent = t(descKey);
+    // in Zone 3 steht das Klima mit dabei
+    const climate = n.climate ? ` ${t(`climate_${n.climate}` as TextKey)}` : '';
+    cardEl.querySelector('.card-desc')!.textContent = t(descKey) + climate;
     cardEl.querySelector('.x')!.addEventListener('click', () => {
       renderer.selected = null;
       renderCard();
@@ -221,7 +239,10 @@ function hint(): string {
   const now = state.stats.playSeconds;
   if (state.events.golden) return t('ev_gold', { t: formatDuration(Math.ceil(state.events.golden.until - now)) });
   const ev = state.events.active;
-  if (ev && ev.until > now) return t(ev.type === 'regen' ? 'ev_regen' : 'ev_duerre', { t: formatDuration(Math.ceil(ev.until - now)) });
+  if (ev && ev.until > now) {
+    const key: TextKey = ev.type === 'regen' ? 'ev_regen' : ev.type === 'wind' ? 'ev_wind' : 'ev_duerre';
+    return t(key, { t: formatDuration(Math.ceil(ev.until - now)) });
+  }
   const c = connectedCount(state);
   if (state.growth) return t('hint_growing', { t: formatDuration(Math.ceil(Renderer.growthEta(state) ?? 0)) });
   if (c === 0) return state.res.n < 20 ? t('hint_start') : t('hint_select');
@@ -237,7 +258,11 @@ function updateUi(force = false): void {
   const sugarOn = sugarUnlocked(state);
   $('#res-sugar').hidden = !sugarOn;
   $('#res-sugar .v').textContent = fmt(state.res.sugar);
-  const waterOn = state.nodes.some((n) => n.connected && n.type === 'feucht');
+  const waterOn = state.nodes.some((n) => n.connected && (n.type === 'feucht' || n.type === 'moor'));
+  const minOn = mineralsUnlocked(state);
+  $('#res-min').hidden = !minOn;
+  $('#res-min .v').textContent = fmt(state.res.minerals);
+  $('#res-min .r').textContent = t('per_sec', { v: fmt(rates.minerals) });
   $('#res-water').hidden = !waterOn;
   $('#res-water .v').textContent = fmt(state.res.water);
   // Raten pro Sekunde wie bei den Nährstoffen; Wasser netto (Zufluss minus Verbrauch der Bäume)
@@ -247,10 +272,13 @@ function updateUi(force = false): void {
   const wEl = $('#res-water .r');
   wEl.textContent = full ? t('water_full') : t('per_sec', { v: `${water > 0 ? '+' : ''}${fmt(water)}` });
   wEl.classList.toggle('neg', water < 0);
+  const c = connectedCount(state);
   $('#net').textContent =
-    state.zone >= 2
-      ? t('net_progress_z2', { c: connectedCount(state), goal: CONFIG.zone2.goal })
-      : t('net_progress', { c: connectedCount(state), goal: CONFIG.zoneGoal });
+    state.zone >= 3
+      ? t('net_progress_z3', { c, goal: CONFIG.zone3.goal })
+      : state.zone >= 2
+        ? t('net_progress_z2', { c, goal: CONFIG.zone2.goal })
+        : t('net_progress', { c, goal: CONFIG.zoneGoal });
   const evA = state.events.active;
   audio.setRain(!!evA && evA.type === 'regen' && evA.until > state.stats.playSeconds);
   audio.setIntensity(connectedCount(state), state.nodes.some((n) => n.connected && n.type === 'feucht'));
@@ -273,14 +301,15 @@ function updateUi(force = false): void {
 
   for (const id of UPGRADE_IDS) {
     const r = upgradeRows.get(id)!;
-    const def = CONFIG.upgrades.find((u) => u.id === id)!;
-    r.row.hidden = def.requiresSugar && !sugarOn;
+    r.row.hidden = !upgradeUnlocked(state, id);
     r.level.textContent = t('level', { v: state.levels[id] });
     r.btn.textContent = costLabel(upgradeCost(state, id));
     r.btn.disabled = !canBuy(state, id);
   }
-  lockedEl.hidden = sugarOn;
-  lockedEl.textContent = t('locked_sugar');
+  // Hinweis auf die nächste noch gesperrte Upgrade-Gruppe
+  const lockKey: TextKey | null = !sugarOn ? 'locked_sugar' : state.zone >= 3 && !minOn ? 'locked_minerals' : null;
+  lockedEl.hidden = !lockKey;
+  if (lockKey) lockedEl.textContent = t(lockKey);
   $('#btn-center').hidden = !renderer.userMoved || !cardEl.hidden;
   const h = hint();
   hintEl.textContent = h;
@@ -300,21 +329,37 @@ function updateUi(force = false): void {
     audio.play('fanfare');
     showMessage(t('zone_title'), t('zone_body', { c: connectedCount(state), t: formatDuration(state.stats.zoneDoneAt) }));
   }
-  if (state.stats.zone2DoneAt !== null && !zone2DoneShown) {
+  if (state.zone >= 3 && !zone3Shown) {
+    zone3Shown = true;
+    zone2DoneShown = true;
+    renderer.startCelebration();
+    audio.play('fanfare');
+    showMessage(t('zone3_title'), t('zone3_body'));
+  } else if (state.stats.zone2DoneAt !== null && !zone2DoneShown) {
     zone2DoneShown = true;
     renderer.startCelebration();
     audio.play('fanfare');
     showMessage(t('zone2_done_title'), t('zone2_done_body', { c: connectedCount(state) }));
   }
+  if (state.stats.zone3DoneAt !== null && !zone3DoneShown) {
+    zone3DoneShown = true;
+    renderer.startCelebration();
+    audio.play('fanfare');
+    showMessage(t('zone3_done_title'), t('zone3_done_body', { c: connectedCount(state) }));
+  }
 }
 let zoneShown = false;
 let zone2Shown = false;
 let zone2DoneShown = false;
+let zone3Shown = false;
+let zone3DoneShown = false;
 /** Nach Laden, Import, Neustart oder Sporenflug: welche Meldungen sind schon „gesehen“? */
 function syncShown(): void {
   zoneShown = state.stats.zoneDoneAt !== null || state.zone >= 2;
   zone2Shown = state.zone >= 2;
-  zone2DoneShown = state.stats.zone2DoneAt !== null;
+  zone2DoneShown = state.stats.zone2DoneAt !== null || state.zone >= 3;
+  zone3Shown = state.zone >= 3;
+  zone3DoneShown = state.stats.zone3DoneAt !== null;
 }
 
 // ---------- Tabs: Wachstum · Genom · Erfolge ----------
@@ -377,7 +422,11 @@ function updatePrestigeBox(): void {
   btn.disabled = !ok;
   btn.textContent = t('prestige_btn', { v: fmt(sporeGain(state)) });
   const c = connectedCount(state);
-  need.textContent = c < CONFIG.prestige.minNodes ? t('prestige_need', { n: CONFIG.prestige.minNodes, c }) : t('prestige_more');
+  const hex = hexBonus(state);
+  need.textContent =
+    c < CONFIG.prestige.minNodes
+      ? t('prestige_need', { n: CONFIG.prestige.minNodes, c })
+      : t('prestige_more') + (hex > 1 ? ` ${t('prestige_hex', { v: fmt((hex - 1) * 100) })}` : '');
 }
 
 function buildGenome(): void {
@@ -392,7 +441,7 @@ function buildGenome(): void {
   need.id = 'prestige-need';
   pr.append(btn, need);
   box.append(pr, el('p', t('spores_have', { v: fmt(state.meta.spores), b: sporeBonusPct() }), 'spores-line'));
-  for (const branch of ['zersetzer', 'symbiont', 'pionier'] as Branch[]) {
+  for (const branch of ['zersetzer', 'symbiont', 'pionier', 'wanderer'] as Branch[]) {
     box.append(el('h3', t(`branch_${branch}` as TextKey), 'branch'));
     for (const g of CONFIG.genome.filter((x) => x.branch === branch)) {
       const row = el('div', '', 'up');
@@ -632,7 +681,7 @@ function showSettings(): void {
     box.append(el('h2', t('settings')));
     box.append(el('h3', t('help')), el('p', t('help_body')));
     const legend = el('div', '', 'legend');
-    for (const type of ['laub', 'totholz', 'feucht', 'baum', 'stein', 'altbaum', 'rivale'] as const) {
+    for (const type of ['laub', 'totholz', 'feucht', 'baum', 'stein', 'altbaum', 'rivale', 'moor', 'mineral', 'hexenring'] as const) {
       const item = el('span', '', 'legend-item');
       const dot = el('i', '', type === 'stein' ? 'hex' : '');
       dot.style.background = NODE_COLORS[type];
@@ -859,6 +908,7 @@ $('#btn-center').textContent = `⌖ ${t('center')}`;
 $('#res-sugar .l').textContent = t('res_sugar');
 $('#res-water .l').textContent = t('res_water');
 $('#res-spores .l').textContent = t('res_spores');
+$('#res-min .l').textContent = t('res_min');
 for (const tb of TABS) {
   const b = $(`#tabs [data-tab="${tb}"]`);
   b.querySelector('.label')!.textContent = t(`tab_${tb}` as TextKey);

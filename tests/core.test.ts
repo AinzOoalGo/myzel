@@ -151,7 +151,7 @@ describe('Upgrades', () => {
   });
   it('Zucker-Upgrades erst nach dem ersten Baum', () => {
     const s = newGame(1);
-    s.res = { n: 1e9, sugar: 1e9, water: 0 };
+    s.res = { n: 1e9, sugar: 1e9, water: 0, minerals: 0 };
     expect(buy(s, 'frucht')).toBe(false);
     connect(s, nearest(s, 'baum').id);
     expect(buy(s, 'frucht')).toBe(true);

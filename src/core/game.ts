@@ -1,4 +1,4 @@
-import { CONFIG, type EventType, type GenomeDef, type GenomeId, type Season, type UpgradeDef, type UpgradeId } from './config';
+import { CONFIG, type Cost, type EventType, type GenomeDef, type GenomeId, type Season, type UpgradeDef, type UpgradeId, type Zone } from './config';
 import { generateMap, pointSegmentDistance, type MapNode } from './map';
 import { createRng } from './rng';
 
@@ -18,6 +18,8 @@ export interface Resources {
   n: number;
   sugar: number;
   water: number;
+  /** ab Zone 3: aus Mineraladern */
+  minerals: number;
 }
 
 /** Bleibt über den Sporenflug hinweg erhalten. */
@@ -27,7 +29,17 @@ export interface Meta {
   runs: number; // abgeschlossene Sporenflüge
   genome: GenomeId[];
   achievements: string[];
-  lifetime: { totalN: number; taps: number; goldCaught: number; rainSeen: number; playSeconds: number; seasons: number; rivalsBeaten: number };
+  lifetime: {
+    totalN: number;
+    taps: number;
+    goldCaught: number;
+    rainSeen: number;
+    playSeconds: number;
+    seasons: number;
+    rivalsBeaten: number;
+    minerals: number;
+    windSeen: number;
+  };
 }
 
 /** Konkurrenzpilz: besetzt nach und nach freie Knoten in Zone 2. */
@@ -66,10 +78,10 @@ export interface GameState {
   levels: Record<UpgradeId, number>;
   growth: Growth | null;
   /** Werte des aktuellen Durchlaufs */
-  stats: { totalN: number; taps: number; playSeconds: number; zoneDoneAt: number | null; zone2DoneAt: number | null };
+  stats: { totalN: number; taps: number; playSeconds: number; zoneDoneAt: number | null; zone2DoneAt: number | null; zone3DoneAt: number | null };
   meta: Meta;
   events: EventsState;
-  zone: 1 | 2;
+  zone: Zone;
   /** Spielsekunde, ab der Zone 2 offen ist (für die Jahreszeiten) */
   zone2Since: number | null;
   rivals: Rival[];
@@ -82,6 +94,7 @@ export interface Rates {
   waterUse: number;
   /** Anteil der Baum-Nachfrage, der gedeckt ist (0..1). */
   treeSupply: number;
+  minerals: number;
 }
 
 export function newMeta(): Meta {
@@ -91,7 +104,7 @@ export function newMeta(): Meta {
     runs: 0,
     genome: [],
     achievements: [],
-    lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0, seasons: 0, rivalsBeaten: 0 },
+    lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0, seasons: 0, rivalsBeaten: 0, minerals: 0, windSeen: 0 },
   };
 }
 
@@ -100,10 +113,10 @@ export function newGame(seed = Math.floor(Math.random() * 2 ** 31), meta: Meta =
     seed,
     nodes: generateMap(seed),
     edges: [],
-    res: { n: 0, sugar: 0, water: 0 },
-    levels: { hyphen: 0, enzym: 0, frucht: 0, rhizo: 0 },
+    res: { n: 0, sugar: 0, water: 0, minerals: 0 },
+    levels: { hyphen: 0, enzym: 0, frucht: 0, rhizo: 0, kristall: 0, fern: 0 },
     growth: null,
-    stats: { totalN: 0, taps: 0, playSeconds: 0, zoneDoneAt: null, zone2DoneAt: null },
+    stats: { totalN: 0, taps: 0, playSeconds: 0, zoneDoneAt: null, zone2DoneAt: null, zone3DoneAt: null },
     meta,
     events: { active: null, golden: null, nextAt: CONFIG.events.firstAt, counter: 0 },
     zone: 1,
@@ -124,7 +137,19 @@ export function eventActive(s: GameState, type: ActiveEvent['type']): boolean {
 }
 
 /** Alle Multiplikatoren an einer Stelle: Genom, Sporen, Erfolge, Ereignisse. */
-const isTree = (n: MapNode): boolean => n.type === 'baum' || n.type === 'altbaum';
+export const isTree = (n: MapNode): boolean => n.type === 'baum' || n.type === 'altbaum';
+
+/** Klima-Faktoren eines Knotens (nur Zone 3, sonst neutral). */
+export function climateOf(node: MapNode): { yield: number; growth: number; water: number; totholz: number; noDrought: boolean } {
+  const c = node.climate ? CONFIG.zone3.climate[node.climate] : null;
+  return {
+    yield: c?.yield ?? 1,
+    growth: c?.growth ?? 1,
+    water: c?.water ?? 1,
+    totholz: c && 'totholz' in c ? c.totholz : 1,
+    noDrought: !!c && 'noDrought' in c && c.noDrought,
+  };
+}
 
 /** Aktuelle Jahreszeit – erst ab Zone 2. */
 export function season(s: GameState): Season | null {
@@ -147,11 +172,15 @@ export function mods(s: GameState) {
   const sc = CONFIG.seasons;
   const se = season(s);
   const z2 = s.zone >= 2;
+  const z3 = s.zone >= 3;
   const trees = has(s, 's4') ? s.nodes.reduce((c, n) => c + (n.connected && isTree(n) ? 1 : 0), 0) : 0;
+  const nodes = has(s, 'w4') ? connectedCount(s) : 0;
   const global =
     (1 + CONFIG.prestige.sporeBonus * s.meta.sporesTotal) *
     (1 + CONFIG.achievementBonus * s.meta.achievements.length) *
     (1 + g.s4PerTree * trees) *
+    (1 + CONFIG.effects.kristallGlobal) ** s.levels.kristall *
+    (1 + g.w4PerNode * nodes) *
     (se === 'winter' ? sc.winter.global : 1);
   return {
     global,
@@ -169,15 +198,26 @@ export function mods(s: GameState) {
       (has(s, 'p3') ? g.p3Speed : 1) *
       (eventActive(s, 'regen') ? CONFIG.events.regen.growth : 1) *
       (z2 ? CONFIG.zone2.speedBonus : 1) *
+      (z3 ? CONFIG.zone3.speedBonus : 1) *
       (se === 'fruehling' ? sc.fruehling.growth : se === 'winter' ? sc.winter.growth : 1),
-    reach: CONFIG.growth.reach + CONFIG.growth.reachPerRhizo * s.levels.rhizo + (has(s, 'p2') ? g.p2Reach : 0) + (z2 ? CONFIG.zone2.reachBonus : 0),
+    reach:
+      CONFIG.growth.reach +
+      CONFIG.growth.reachPerRhizo * s.levels.rhizo +
+      (has(s, 'p2') ? g.p2Reach : 0) +
+      (z2 ? CONFIG.zone2.reachBonus : 0) +
+      (z3 ? CONFIG.zone3.reachBonus + CONFIG.effects.fernReach * s.levels.fern : 0),
     offlineCap: has(s, 's3') ? g.s3Offline : CONFIG.offlineCapSeconds,
+    minerals: has(s, 'w2') ? g.w2Min : 1,
+    hex: has(s, 'w3') ? g.w3Hex : 1,
   };
 }
 
 // ---------- abgeleitete Werte ----------
 
-export const distanceBonus = (node: MapNode): number => 1 + node.dist / CONFIG.distanceScale;
+export const distanceBonus = (node: MapNode): number => {
+  const edge = CONFIG.zone2.outerRadius;
+  return 1 + Math.min(node.dist, edge) / CONFIG.distanceScale + Math.max(0, node.dist - edge) / CONFIG.zone3.distanceScaleOuter;
+};
 
 export function connectedCount(s: GameState): number {
   return s.nodes.reduce((c, n) => c + (n.connected && n.type !== 'spore' ? 1 : 0), 0);
@@ -195,19 +235,38 @@ export function sugarUnlocked(s: GameState): boolean {
   return s.nodes.some((n) => n.connected && isTree(n));
 }
 
+export function mineralsUnlocked(s: GameState): boolean {
+  return s.res.minerals > 0 || s.nodes.some((n) => n.connected && n.type === 'mineral');
+}
+
 /** Totholz: Abbau des Vorrats pro Sekunde. */
 export type Mods = ReturnType<typeof mods>;
 
 export function totholzRate(s: GameState, node: MapNode, m: Mods = mods(s)): number {
-  return CONFIG.nodes.totholz.nps * distanceBonus(node) * m.decomp;
+  const c = climateOf(node);
+  return CONFIG.nodes.totholz.nps * distanceBonus(node) * m.decomp * c.yield * c.totholz;
 }
 
 /** Nährstoffertrag eines Knotens pro Sekunde (für Anzeige und Produktion). */
 export function nodeYield(s: GameState, node: MapNode, m: Mods = mods(s)): number {
-  if (node.type === 'laub') return CONFIG.nodes.laub.nps * distanceBonus(node) * m.decomp * m.laub * m.global;
+  const c = climateOf(node).yield;
+  if (node.type === 'laub') return CONFIG.nodes.laub.nps * distanceBonus(node) * m.decomp * m.laub * m.global * c;
   if (node.type === 'totholz') return node.stock > 0 ? totholzRate(s, node, m) * m.stock * m.global : 0;
-  if (node.type === 'rivale') return CONFIG.rivals.coreNps * distanceBonus(node) * m.global;
+  if (node.type === 'rivale') return CONFIG.rivals.coreNps * distanceBonus(node) * m.global * c;
+  if (node.type === 'moor') return CONFIG.zone3Nodes.moor.nps * distanceBonus(node) * m.decomp * m.global * c;
   return 0;
+}
+
+/** Wasser eines Knotens pro Sekunde (Feuchtstelle, Moor). */
+export function nodeWater(node: MapNode, m: Mods, droughtFactor = 1): number {
+  const c = climateOf(node);
+  const base = node.type === 'feucht' ? CONFIG.nodes.feucht.water : node.type === 'moor' ? CONFIG.zone3Nodes.moor.water : 0;
+  return base * distanceBonus(node) * m.water * c.water * (c.noDrought ? 1 : droughtFactor);
+}
+
+/** Mineralien einer Ader pro Sekunde (ohne Entfernungsbonus – sie sollen knapp bleiben). */
+export function nodeMinerals(node: MapNode, m: Mods): number {
+  return node.type === 'mineral' ? CONFIG.zone3Nodes.mineral.min * m.minerals * climateOf(node).yield : 0;
 }
 
 export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mods(s)): Rates {
@@ -215,6 +274,7 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
   let sugar = 0;
   let waterIn = 0;
   let treeDemand = 0;
+  let minerals = 0;
   const drought = eventActive(s, 'duerre') ? (offline ? CONFIG.events.duerre.offlineWater : CONFIG.events.duerre.water) : 1;
   for (const node of s.nodes) {
     if (!node.connected) continue;
@@ -223,11 +283,18 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
       case 'rivale':
         n += nodeYield(s, node, m);
         break;
+      case 'moor':
+        n += nodeYield(s, node, m);
+        waterIn += nodeWater(node, m, drought);
+        break;
+      case 'mineral':
+        minerals += nodeMinerals(node, m);
+        break;
       case 'totholz':
         if (node.stock > 0) n += Math.min(totholzRate(s, node, m), node.stock / dt) * m.stock * m.global;
         break;
       case 'feucht':
-        waterIn += CONFIG.nodes.feucht.water * distanceBonus(node) * m.water * drought;
+        waterIn += nodeWater(node, m, drought);
         break;
       case 'baum':
       case 'altbaum':
@@ -240,10 +307,11 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
   const available = s.res.water / dt + waterIn;
   const treeSupply = treeDemand === 0 ? 0 : Math.min(1, available / treeDemand);
   for (const node of s.nodes) {
-    if (node.connected && isTree(node)) sugar += CONFIG.nodes[node.type as 'baum' | 'altbaum'].sugar * distanceBonus(node) * treeSupply * m.sugar;
+    if (node.connected && isTree(node))
+      sugar += CONFIG.nodes[node.type as 'baum' | 'altbaum'].sugar * distanceBonus(node) * treeSupply * m.sugar * climateOf(node).yield;
   }
   n += CONFIG.effects.fruchtNps * s.levels.frucht * m.global;
-  return { n, sugar, waterIn, waterUse: treeDemand * treeSupply, treeSupply };
+  return { n, sugar, waterIn, waterUse: treeDemand * treeSupply, treeSupply, minerals };
 }
 
 // ---------- Simulation ----------
@@ -258,8 +326,10 @@ export function tick(s: GameState, dt: number, offline = false): void {
   }
   addNutrients(s, rates.n * dt);
   s.res.sugar += rates.sugar * dt;
+  s.res.minerals += rates.minerals * dt;
+  s.meta.lifetime.minerals += rates.minerals * dt;
   s.res.water = Math.min(m.waterCap, Math.max(0, s.res.water + (rates.waterIn - rates.waterUse) * dt));
-  advanceGrowth(s, CONFIG.growth.speed * m.growthSpeed * dt);
+  advanceGrowth(s, CONFIG.growth.speed * m.growthSpeed * growthClimate(s) * dt);
   s.stats.playSeconds += dt;
   s.meta.lifetime.playSeconds += dt;
   updateEvents(s, offline);
@@ -272,6 +342,12 @@ function addNutrients(s: GameState, amount: number): void {
   s.res.n += amount;
   s.stats.totalN += amount;
   s.meta.lifetime.totalN += amount;
+}
+
+/** Fäden in die Tropen wachsen schneller, in die Taiga langsamer. */
+function growthClimate(s: GameState): number {
+  const t = s.growth ? s.nodes[s.growth.to] : null;
+  return t ? climateOf(t).growth : 1;
 }
 
 function advanceGrowth(s: GameState, units: number): void {
@@ -294,6 +370,11 @@ function advanceGrowth(s: GameState, units: number): void {
       for (const r of s.rivals) r.nextAt = s.stats.playSeconds + CONFIG.rivals.interval * 2;
     }
     if (s.stats.zone2DoneAt === null && c >= CONFIG.zone2.goal) s.stats.zone2DoneAt = s.stats.playSeconds;
+    if (s.zone === 2 && c >= CONFIG.zone3.unlockAt) {
+      s.zone = 3;
+      for (const r of s.rivals) if (s.nodes[r.core]?.zone === 3) r.nextAt = s.stats.playSeconds + CONFIG.rivals.interval * 2;
+    }
+    if (s.stats.zone3DoneAt === null && c >= CONFIG.zone3.goal) s.stats.zone3DoneAt = s.stats.playSeconds;
   }
 }
 
@@ -304,7 +385,7 @@ function initRivals(s: GameState): void {
   for (const n of s.nodes) {
     if (n.type !== 'rivale') continue;
     n.owner = s.rivals.length + 1;
-    s.rivals.push({ core: n.id, edges: [], nextAt: 0, alive: true, reach: CONFIG.rivals.reach });
+    s.rivals.push({ core: n.id, edges: [], nextAt: 0, alive: true, reach: n.zone === 3 ? CONFIG.zone3.rivalReach : CONFIG.rivals.reach });
   }
 }
 
@@ -349,11 +430,13 @@ export function rivalStep(s: GameState, index: number): MapNode | null {
   const r = s.rivals[index];
   if (!r || !r.alive) return null;
   const owned = s.nodes.filter((n) => n.owner === index + 1);
+  // jeder Rivale bleibt in seiner eigenen Zone
+  const zone = s.nodes[r.core]?.zone ?? 2;
   let best: MapNode | null = null;
   let bestFrom: MapNode | null = null;
   let bestD = Infinity;
   for (const n of s.nodes) {
-    if (n.zone !== 2 || n.connected || n.owner !== 0 || n.type === 'stein' || n.type === 'rivale') continue;
+    if (n.zone !== zone || n.connected || n.owner !== 0 || n.type === 'stein' || n.type === 'rivale') continue;
     if (s.growth?.to === n.id) continue;
     for (const o of owned) {
       const d = Math.hypot(o.x - n.x, o.y - n.y);
@@ -374,11 +457,13 @@ function updateRivals(s: GameState, offline: boolean): void {
   if (s.zone < 2) return;
   const now = s.stats.playSeconds;
   s.rivals.forEach((r, i) => {
-    if (!r.alive || now < r.nextAt) return;
+    const zone = s.nodes[r.core]?.zone ?? 2;
+    if (!r.alive || zone > s.zone || now < r.nextAt) return;
     r.nextAt = now + (offline ? CONFIG.rivals.offlineInterval : CONFIG.rivals.interval);
-    if (!rivalStep(s, i) && r.reach < CONFIG.rivals.maxReach) {
+    const max = zone === 3 ? CONFIG.zone3.rivalMaxReach : CONFIG.rivals.maxReach;
+    if (!rivalStep(s, i) && r.reach < max) {
       // nichts in Reichweite: weiter ausgreifen und bald erneut versuchen
-      r.reach = Math.min(CONFIG.rivals.maxReach, r.reach + CONFIG.rivals.reachStep);
+      r.reach = Math.min(max, r.reach + CONFIG.rivals.reachStep * (zone === 3 ? 2.5 : 1));
       r.nextAt = now + 15;
     }
   });
@@ -411,11 +496,12 @@ function updateEvents(s: GameState, offline: boolean): void {
   const c = CONFIG.events;
   ev.nextAt = now + c.minGap + rng() * (c.maxGap - c.minGap);
   const hasTree = sugarUnlocked(s);
-  const weights = { ...c.weights, duerre: hasTree ? c.weights.duerre : 0 };
-  const total = weights.regen + weights.duerre + weights.gold;
+  const windW = s.zone >= 3 ? c.weights.wind * (has(s, 'w1') ? CONFIG.genomeEffects.w1Wind : 1) : 0;
+  const weights = { ...c.weights, duerre: hasTree ? c.weights.duerre : 0, wind: windW };
+  const total = weights.regen + weights.duerre + weights.gold + weights.wind;
   let roll = rng() * total;
   let type: EventType = 'regen';
-  for (const t of ['regen', 'duerre', 'gold'] as EventType[]) {
+  for (const t of ['regen', 'duerre', 'gold', 'wind'] as EventType[]) {
     roll -= weights[t];
     if (roll < 0) {
       type = t;
@@ -431,8 +517,10 @@ function updateEvents(s: GameState, offline: boolean): void {
     ev.golden = { x: a.x + Math.cos(ang) * d, y: a.y + Math.sin(ang) * d, until: now + c.gold.duration };
     return;
   }
-  ev.active = { type, until: now + c[type].duration };
+  const dur = c[type].duration * (type === 'wind' && has(s, 'w1') ? 1.5 : 1);
+  ev.active = { type, until: now + dur };
   if (type === 'regen') s.meta.lifetime.rainSeen++;
+  if (type === 'wind') s.meta.lifetime.windSeen++;
 }
 
 /** Goldenen Fruchtkörper einsammeln: Bonus = 60 s Produktion. */
@@ -487,9 +575,16 @@ export function growthCost(s: GameState, length: number, target?: MapNode): numb
   const g = CONFIG.growth;
   const n = connectedCount(s);
   const u = CONFIG.zone2.unlockAt;
-  const scale = n <= u ? g.costPerNode ** n : g.costPerNode ** u * CONFIG.zone2.costPerNode ** (n - u);
+  const u3 = CONFIG.zone3.unlockAt;
+  // Kostenanstieg wird mit jeder Zone flacher – sonst wären die großen Zonen unbezahlbar
+  const scale =
+    g.costPerNode ** Math.min(n, u) *
+    CONFIG.zone2.costPerNode ** Math.max(0, Math.min(n, u3) - u) *
+    CONFIG.zone3.costPerNode ** Math.max(0, n - u3);
   const extra = !target ? 1 : target.type === 'rivale' ? CONFIG.rivals.coreCost : target.owner > 0 ? CONFIG.rivals.reclaimCost : 1;
-  return g.costPerUnit * length * scale * mods(s).growthCost * extra;
+  // Sporenwind trägt die Fäden – sie kosten nur einen Bruchteil
+  const wind = eventActive(s, 'wind') ? CONFIG.events.wind.cost : 1;
+  return g.costPerUnit * length * scale * mods(s).growthCost * extra * wind;
 }
 
 export type GrowResult = { ok: true } | { ok: false; reason: 'busy' | 'unreachable' | 'cost' };
@@ -518,17 +613,21 @@ export function upgradeDef(id: UpgradeId): UpgradeDef {
   return def;
 }
 
-export function upgradeCost(s: GameState, id: UpgradeId): { n: number; sugar: number } {
+export function upgradeCost(s: GameState, id: UpgradeId): Cost {
   const def = upgradeDef(id);
   const f = def.growth ** s.levels[id];
-  return { n: def.baseCost.n * f, sugar: def.baseCost.sugar * f };
+  return { n: def.baseCost.n * f, sugar: def.baseCost.sugar * f, min: def.baseCost.min * f };
+}
+
+export function upgradeUnlocked(s: GameState, id: UpgradeId): boolean {
+  const u = upgradeDef(id).unlock;
+  return u === 'none' || (u === 'sugar' ? sugarUnlocked(s) : mineralsUnlocked(s));
 }
 
 export function canBuy(s: GameState, id: UpgradeId): boolean {
-  const def = upgradeDef(id);
-  if (def.requiresSugar && !sugarUnlocked(s)) return false;
+  if (!upgradeUnlocked(s, id)) return false;
   const c = upgradeCost(s, id);
-  return s.res.n >= c.n && s.res.sugar >= c.sugar;
+  return s.res.n >= c.n && s.res.sugar >= c.sugar && s.res.minerals >= c.min;
 }
 
 export function buy(s: GameState, id: UpgradeId): boolean {
@@ -536,14 +635,21 @@ export function buy(s: GameState, id: UpgradeId): boolean {
   const c = upgradeCost(s, id);
   s.res.n -= c.n;
   s.res.sugar -= c.sugar;
+  s.res.minerals -= c.min;
   s.levels[id]++;
   return true;
 }
 
 // ---------- Sporenflug & Genom ----------
 
+/** Faktor aus verbundenen Hexenringen (+25 % Sporen je Ring, mit „Hexenmeister“ doppelt). */
+export function hexBonus(s: GameState): number {
+  const rings = s.nodes.reduce((c, n) => c + (n.connected && n.type === 'hexenring' ? 1 : 0), 0);
+  return 1 + rings * CONFIG.zone3Nodes.hexenring.sporeBonus * mods(s).hex;
+}
+
 export function sporeGain(s: GameState): number {
-  return Math.floor(Math.sqrt(s.stats.totalN / CONFIG.prestige.divisor));
+  return Math.floor(Math.sqrt(s.stats.totalN / CONFIG.prestige.divisor) * hexBonus(s));
 }
 
 export function canPrestige(s: GameState): boolean {

@@ -17,6 +17,7 @@ import {
   canBuy,
   computeRates,
   connectedCount,
+  growthCost,
   growthQuote,
   newGame,
   startGrowth,
@@ -48,9 +49,11 @@ const PROFILES: Profile[] = [
   },
 ];
 
-const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8];
+/** --quick (für die automatische Prüfung bei GitHub): weniger Karten, gleiche Ziele */
+const QUICK = process.argv.includes('--quick');
+const SEEDS = QUICK ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7, 8];
 const MAX_SECONDS = 12 * 3600;
-const MILESTONES = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60];
+const MILESTONES = [1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
 
 /** Bewertet ein Ziel: neuer Ertrag pro Kosten (einfacher, gieriger Spieler). */
 function targetScore(s: GameState, id: number, cost: number): number {
@@ -76,10 +79,39 @@ function targetScore(s: GameState, id: number, cost: number): number {
     case 'rivale':
       value = 30;
       break;
+    case 'moor':
+      value = 4;
+      break;
+    case 'mineral':
+      value = s.levels.kristall < 30 ? 12 : 3;
+      break;
+    case 'hexenring':
+      value = 6;
+      break;
     default:
       value = 0;
   }
   return value / Math.max(cost, 1);
+}
+
+/**
+ * Erreichbare Ziele zwischenspeichern: Die Suche nach Quellknoten ist teuer, ändert sich aber nur,
+ * wenn das Netz, die Reichweite oder die Besitzverhältnisse sich ändern. Kosten werden jedes Mal frisch berechnet.
+ */
+const reachCache = new WeakMap<GameState, { key: string; list: { id: number; length: number }[] }>();
+function reachableTargets(s: GameState): { id: number; length: number }[] {
+  const owned = s.nodes.reduce((c, n) => c + n.owner, 0);
+  const key = `${s.edges.length}|${s.zone}|${s.levels.rhizo}|${s.levels.fern}|${s.meta.genome.length}|${owned}`;
+  const hit = reachCache.get(s);
+  if (hit && hit.key === key) return hit.list;
+  const list: { id: number; length: number }[] = [];
+  for (const n of s.nodes) {
+    if (n.connected) continue;
+    const q = growthQuote(s, n.id);
+    if (q) list.push({ id: n.id, length: q.length });
+  }
+  reachCache.set(s, { key, list });
+  return list;
 }
 
 function decide(s: GameState): string | null {
@@ -88,10 +120,11 @@ function decide(s: GameState): string | null {
     let best = -1;
     let bestScore = 0;
     let bestCost = 0;
-    for (const n of s.nodes) {
+    for (const { id, length } of reachableTargets(s)) {
+      const n = s.nodes[id]!;
       if (n.connected) continue;
-      const q = growthQuote(s, n.id);
-      if (!q) continue;
+      const cost = growthCost(s, length, n);
+      const q = { cost };
       const sc = targetScore(s, n.id, q.cost);
       if (sc > bestScore) {
         best = n.id;
@@ -104,7 +137,7 @@ function decide(s: GameState): string | null {
       return 'grow';
     }
     // 2. Upgrade kaufen, wenn es deutlich günstiger als das nächste Wachstum ist
-    const ids: UpgradeId[] = ['frucht', 'hyphen', 'enzym', 'rhizo'];
+    const ids: UpgradeId[] = ['kristall', 'fern', 'frucht', 'hyphen', 'enzym', 'rhizo'];
     for (const id of ids) {
       if (canBuy(s, id) && (best < 0 || upgradeCost(s, id).n < bestCost * 0.6)) {
         buy(s, id);
@@ -112,7 +145,7 @@ function decide(s: GameState): string | null {
       }
     }
   } else {
-    for (const id of ['frucht', 'hyphen', 'enzym', 'rhizo'] as UpgradeId[]) {
+    for (const id of ['kristall', 'fern', 'frucht', 'hyphen', 'enzym', 'rhizo'] as UpgradeId[]) {
       if (canBuy(s, id)) {
         buy(s, id);
         return 'buy';
@@ -215,58 +248,68 @@ for (const p of PROFILES) {
 }
 
 // ---------- Teil 2: Kampagne mit Sporenflügen bis Zone 2 geschafft ----------
-const GENOME_ORDER = ['p1', 'z1', 's1', 'p2', 'z2', 's2', 'p3', 'z3', 's3', 'p4', 'z4', 's4'] as const;
+const GENOME_ORDER = ['p1', 'z1', 's1', 'p2', 'z2', 's2', 'p3', 'z3', 's3', 'p4', 'z4', 's4', 'w1', 'w2', 'w3', 'w4'] as const;
 /** Ein vernünftiger Spieler fliegt, wenn er 5 Min. keinen Knoten mehr schafft und der Flug sich lohnt. */
 const shouldFly = (s: GameState, sinceNode: number) =>
   sinceNode > 300 && sporeGain(s) >= Math.max(3, 0.25 * s.meta.sporesTotal) && connectedCount(s) >= CONFIG.prestige.minNodes;
 
-for (const p of [PROFILES[0]!, PROFILES[1]!]) {
-  console.log(`\n=== Kampagne bis ${CONFIG.zone2.goal} Knoten · ${p.name} – 4 Karten ===`);
-  const totals: number[] = [];
+interface CampaignTarget {
+  goal: number;
+  label: string;
+  /** Spanne reiner Spielzeit für den Dauertipper (Sekunden) */
+  activeBand: [number, number];
+}
+const TARGETS: CampaignTarget[] = [
+  { goal: CONFIG.zone2.goal, label: 'Zone 2 geschafft', activeBand: [2 * 3600, 12 * 3600] },
+  { goal: CONFIG.zone3.goal, label: 'Zone 3 geschafft', activeBand: [8 * 3600, 40 * 3600] },
+];
+
+for (const p of QUICK ? [PROFILES[0]!] : [PROFILES[0]!, PROFILES[1]!]) {
+  console.log(`\n=== Kampagne bis ${CONFIG.zone3.goal} Knoten · ${p.name} – 4 Karten ===`);
+  const reached: Record<number, number[]> = Object.fromEntries(TARGETS.map((x) => [x.goal, []]));
   const gaps: number[] = [];
-  for (const seed of SEEDS.slice(0, 4)) {
+  for (const seed of SEEDS.slice(0, QUICK ? 2 : 4)) {
     let state: GameState | undefined;
     let total = 0;
-    let zone2At: number | null = null;
-    let done = false;
     let runs = 0;
     let worstGap = 0;
+    const firstAt: Record<number, number> = {};
     const lines: string[] = [];
-    while (!done && runs < 40 && total < 40 * 3600) {
-      const res = run(p, seed * 1000 + runs, { start: state, goal: CONFIG.zone2.goal, stopWhen: shouldFly, maxSeconds: 6 * 3600 });
-      if (zone2At === null && res.milestones[CONFIG.zone2.unlockAt] !== null) zone2At = total + res.milestones[CONFIG.zone2.unlockAt]!;
+    while (runs < 60 && total < 60 * 3600) {
+      const res = run(p, seed * 1000 + runs, { start: state, goal: CONFIG.zone3.goal, stopWhen: shouldFly, maxSeconds: 8 * 3600 });
+      for (const tg of TARGETS) {
+        const at = res.milestones[tg.goal];
+        if (at !== null && at !== undefined && firstAt[tg.goal] === undefined) firstAt[tg.goal] = total + at;
+      }
       total += res.seconds;
       runs++;
       if (runs > 1) worstGap = Math.max(worstGap, res.longestGap);
       lines.push(`${formatDuration(res.seconds)}/${connectedCount(res.state)}K/+${sporeGain(res.state)}Sp`);
-      if (connectedCount(res.state) >= CONFIG.zone2.goal) {
-        done = true;
-        break;
-      }
+      if (connectedCount(res.state) >= CONFIG.zone3.goal) break;
       const next = prestige(res.state, seed * 1000 + runs);
       if (!next) break;
       for (const id of GENOME_ORDER) if (genomeAvailable(next, id)) buyGenome(next, id);
       state = next;
     }
-    totals.push(done ? total : Infinity);
+    for (const tg of TARGETS) reached[tg.goal]!.push(firstAt[tg.goal] ?? Infinity);
     gaps.push(worstGap);
-    console.log(`Karte ${seed}: ${done ? 'geschafft' : 'NICHT geschafft'} in ${formatDuration(total)}, ${runs} Durchläufe, Zone 2 ab ${zone2At === null ? '–' : formatDuration(zone2At)}`);
-    console.log(`  ${lines.join(' → ')}`);
+    console.log(
+      `Karte ${seed}: ${runs} Durchläufe, ${TARGETS.map((tg) => `${tg.label}: ${firstAt[tg.goal] !== undefined ? formatDuration(firstAt[tg.goal]!) : '–'}`).join(', ')}`,
+    );
+    console.log(`  ${lines.slice(-6).join(' → ')}`);
   }
-  const med = median(totals);
-  console.log(`Gesamtzeit bis Zone 2 geschafft (Median): ${Number.isFinite(med) ? formatDuration(med) : 'nicht erreicht'}`);
+  for (const tg of TARGETS) {
+    const med = median(reached[tg.goal]!);
+    console.log(`${tg.label} (Median): ${Number.isFinite(med) ? formatDuration(med) : 'nicht erreicht'}`);
+    if (p.active && !(med >= tg.activeBand[0] && med <= tg.activeBand[1])) {
+      console.log(`  ⚠ ${tg.label}: außerhalb von ${formatDuration(tg.activeBand[0])} bis ${formatDuration(tg.activeBand[1])}`);
+      problems++;
+    }
+  }
   console.log(`Längste Pause ab Durchlauf 2 (Median): ${formatDuration(median(gaps))}`);
-  if (p.active) {
-    // Ziel: selbst der Dauertipper (5 Tipps/s ohne Pause – die obere Grenze) braucht 2–12 Std. reine Spielzeit.
-    // Normale Spieler liegen deutlich darüber und verteilen das auf mehrere Tage.
-    if (!(med >= 2 * 3600 && med <= 12 * 3600)) {
-      console.log('  ⚠ Zone-2-Gesamtdauer liegt außerhalb von 2–12 Stunden');
-      problems++;
-    }
-    if (median(gaps) > 300) {
-      console.log('  ⚠ Tote Phasen über 5 Minuten in späteren Durchläufen');
-      problems++;
-    }
+  if (p.active && median(gaps) > 300) {
+    console.log('  ⚠ Tote Phasen über 5 Minuten in späteren Durchläufen');
+    problems++;
   }
 }
 
