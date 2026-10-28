@@ -53,14 +53,16 @@ export interface Prefs {
   devMode: boolean;
   /** Liste unten aufgeklappt? */
   panelOpen: boolean;
+  /** Gerätename für die Statistik, z. B. „Test“ oder „Normal“ */
+  device: string;
 }
 
 export function loadPrefs(): Prefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs>;
-    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion(), speed: typeof p.speed === 'number' ? p.speed : 1, music: typeof p.music === 'number' ? p.music : 0.5, sfx: typeof p.sfx === 'number' ? p.sfx : 0.7, devMode: p.devMode === true, panelOpen: p.panelOpen === true };
+    return { vibration: p.vibration ?? true, reducedMotion: p.reducedMotion ?? systemReducedMotion(), speed: typeof p.speed === 'number' ? p.speed : 1, music: typeof p.music === 'number' ? p.music : 0.5, sfx: typeof p.sfx === 'number' ? p.sfx : 0.7, devMode: p.devMode === true, panelOpen: p.panelOpen === true, device: typeof p.device === 'string' ? p.device : '' };
   } catch {
-    return { vibration: true, reducedMotion: systemReducedMotion(), speed: 1, music: 0.5, sfx: 0.7, devMode: false, panelOpen: false };
+    return { vibration: true, reducedMotion: systemReducedMotion(), speed: 1, music: 0.5, sfx: 0.7, devMode: false, panelOpen: false, device: '' };
   }
 }
 

@@ -2,6 +2,7 @@ import { CONFIG, type Cost, type EventType, type GenomeDef, type GenomeId, type 
 import { generateMap, pointSegmentDistance, type MapNode } from './map';
 import { createRng } from './rng';
 import { bump, newDaily, type Daily } from './daily';
+import { newRunTrack, newTrack, type RunRecord, type Track } from './tracking';
 
 export interface Edge {
   from: number;
@@ -33,6 +34,8 @@ export interface Meta {
   genomeLevels: Partial<Record<GenomeId, number>>;
   /** tägliche Aufgaben (bleiben über den Sporenflug erhalten) */
   daily: Daily;
+  /** Spielstatistik (nur lokal) */
+  track: Track;
   achievements: string[];
   lifetime: {
     totalN: number;
@@ -110,6 +113,7 @@ export function newMeta(): Meta {
     genome: [],
     genomeLevels: {},
     daily: newDaily(),
+    track: newTrack(),
     achievements: [],
     lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0, seasons: 0, rivalsBeaten: 0, minerals: 0, windSeen: 0 },
   };
@@ -391,6 +395,7 @@ function advanceGrowth(s: GameState, units: number): void {
     if (s.stats.zone2DoneAt === null && c >= CONFIG.zone2.goal) s.stats.zone2DoneAt = s.stats.playSeconds;
     if (s.zone === 2 && c >= CONFIG.zone3.unlockAt) {
       s.zone = 3;
+      s.meta.track.run.zone3At = s.stats.playSeconds;
       for (const r of s.rivals) if (s.nodes[r.core]?.zone === 3) r.nextAt = s.stats.playSeconds + CONFIG.rivals.interval * 2;
     }
     if (s.stats.zone3DoneAt === null && c >= CONFIG.zone3.goal) s.stats.zone3DoneAt = s.stats.playSeconds;
@@ -679,7 +684,29 @@ export function canPrestige(s: GameState): boolean {
 }
 
 /** Neuer Wald, gleiche Meta-Daten plus die gewonnenen Sporen. */
-export function prestige(s: GameState, newSeed = Math.floor(Math.random() * 2 ** 31)): GameState | null {
+/** Zusammenfassung des laufenden Durchlaufs für die Statistik */
+export function runRecord(s: GameState, now: number, spores: number): RunRecord {
+  const r = s.meta.track.run;
+  return {
+    n: s.meta.runs + 1,
+    startedAt: r.startedAt,
+    endedAt: now,
+    playSec: Math.round(s.stats.playSeconds),
+    realSec: Math.round(r.realActive),
+    testSec: Math.round(r.testReal),
+    offlineSec: Math.round(r.offline),
+    nodes: connectedCount(s),
+    zone: s.zone,
+    spores,
+    zone1DoneAt: s.stats.zoneDoneAt === null ? null : Math.round(s.stats.zoneDoneAt),
+    zone2At: s.zone2Since === null ? null : Math.round(s.zone2Since),
+    zone2DoneAt: s.stats.zone2DoneAt === null ? null : Math.round(s.stats.zone2DoneAt),
+    zone3At: r.zone3At === null ? null : Math.round(r.zone3At),
+    zone3DoneAt: s.stats.zone3DoneAt === null ? null : Math.round(s.stats.zone3DoneAt),
+  };
+}
+
+export function prestige(s: GameState, newSeed = Math.floor(Math.random() * 2 ** 31), now = Date.now()): GameState | null {
   if (!canPrestige(s)) return null;
   const gain = sporeGain(s);
   const meta: Meta = {
@@ -690,9 +717,14 @@ export function prestige(s: GameState, newSeed = Math.floor(Math.random() * 2 **
     genome: [...s.meta.genome],
     genomeLevels: { ...s.meta.genomeLevels },
     daily: structuredClone(s.meta.daily),
+    track: structuredClone(s.meta.track),
     achievements: [...s.meta.achievements],
     lifetime: { ...s.meta.lifetime },
   };
+  // Statistik: Durchlauf abschließen, neuen beginnen
+  meta.track.history.push(runRecord(s, now, gain));
+  if (meta.track.history.length > 100) meta.track.history.shift();
+  meta.track.run = newRunTrack(now);
   const next = newGame(newSeed, meta);
   bump(next, 'prestige');
   return next;

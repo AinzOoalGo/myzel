@@ -36,6 +36,8 @@ import {
 } from './core/game';
 import { formatDuration, formatNumber } from './core/format';
 import { applyOffline, deserialize, exportString, importString, serialize } from './core/save';
+import { trackActive, trackOffline, trackSession } from './core/tracking';
+import { statsSummary, statsText } from './ui/stats';
 import { t } from './i18n';
 import type { TextKey } from './i18n/de';
 import { NODE_COLORS, Renderer } from './ui/render';
@@ -70,6 +72,7 @@ function boot(): { state: GameState; welcome: { seconds: number; gained: number 
       const loaded = deserialize(raw);
       const savedAt = (raw as { savedAt?: number }).savedAt ?? Date.now();
       const off = applyOffline(loaded, savedAt, Date.now());
+      trackOffline(loaded.meta.track, off.seconds);
       return { state: loaded, welcome: off.seconds > 60 && off.gained > 0 ? off : null, restored };
     } catch (err) {
       console.warn('Spielstand konnte nicht geladen werden.', err);
@@ -80,6 +83,25 @@ function boot(): { state: GameState; welcome: { seconds: number; gained: number 
 
 const booted = boot();
 let state: GameState = booted.state;
+// ältere Spielstände kennen den Startzeitpunkt des Durchlaufs nicht
+if (!state.meta.track.run.startedAt) state.meta.track.run.startedAt = Date.now();
+
+/** Sitzungen: Start beim Öffnen; kurze Unterbrechungen (< 30 s) zählen nicht als neue Sitzung. */
+let sessionStart = Date.now();
+let hiddenAt = 0;
+function endSession(): void {
+  hiddenAt = Date.now();
+  trackSession(state.meta.track, (hiddenAt - sessionStart) / 1000);
+}
+function resumeSession(): void {
+  const t = state.meta.track;
+  if (hiddenAt && Date.now() - hiddenAt < 30_000) {
+    // gleiche Sitzung: zuletzt gespeicherte Länge wieder zurücknehmen
+    t.sessions = Math.max(0, t.sessions - 1);
+    t.sessionLens.pop();
+  } else sessionStart = Date.now();
+  hiddenAt = 0;
+}
 
 function save(): void {
   storageOk = saveRaw(serialize(state, Date.now()));
@@ -823,6 +845,45 @@ function showSettings(): void {
 
     if (!storageOk) box.append(el('p', t('storage_warning'), 'warn'));
 
+    // ---- Statistik ----
+    box.append(el('h3', t('stats_title')));
+    const nameRow = el('label', '', 'slider');
+    const nameIn = el('input');
+    nameIn.type = 'text';
+    nameIn.maxLength = 20;
+    nameIn.placeholder = t('stats_device_ph');
+    nameIn.value = prefs.device;
+    nameIn.className = 'text-in';
+    nameIn.addEventListener('change', () => {
+      prefs.device = nameIn.value.trim();
+      savePrefs(prefs);
+    });
+    nameRow.append(el('span', t('stats_device')), nameIn);
+    box.append(nameRow);
+    const table = el('div', '', 'stats');
+    for (const [k, v] of statsSummary(state)) {
+      const row = el('div', '', 'stats-row');
+      row.append(el('span', k), el('strong', v));
+      table.append(row);
+    }
+    box.append(table);
+    const statsBtn = el('button', t('stats_copy'));
+    statsBtn.addEventListener('click', async () => {
+      const text = statsText(state, prefs.device, t('version'));
+      try {
+        await navigator.clipboard.writeText(text);
+        statsBtn.textContent = t('copied');
+      } catch {
+        // Kopieren nicht erlaubt: Text zum manuellen Kopieren anzeigen
+        const ta = el('textarea');
+        ta.readOnly = true;
+        ta.value = text;
+        statsBtn.after(ta);
+        ta.select();
+      }
+    });
+    box.append(statsBtn, el('p', t('stats_hint'), 'small'));
+
     box.append(el('h3', t('export')), el('p', t('export_hint'), 'small'));
     const out = el('textarea');
     out.readOnly = true;
@@ -927,11 +988,13 @@ function step(now: number): void {
   if (elapsed > 5) {
     // Tab war im Hintergrund: wie Offline-Zeit nachholen
     const off = applyOffline(state, Date.now() - elapsed * 1000, Date.now());
+    trackOffline(state.meta.track, off.seconds);
     if (off.seconds > 60 && off.gained > 0) showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(off.seconds), v: fmt(off.gained) }));
     elapsed = 0;
   }
   // im Testmodus läuft die Spielzeit schneller (Produktion, Wachstum, Ereignisse, Jahreszeiten, Rivalen)
   acc += elapsed * speed();
+  trackActive(state.meta.track, elapsed, speed());
   const edgesBefore = state.edges.length;
   while (acc >= DT) {
     tick(state, DT);
@@ -957,9 +1020,11 @@ function step(now: number): void {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
+    endSession();
     save();
     audio.suspend();
   } else {
+    resumeSession();
     audio.resume();
     checkDay();
   }
