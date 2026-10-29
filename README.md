@@ -1,20 +1,36 @@
 # Myzel
 
 **▶ Jetzt spielen: https://ainzooalgo.github.io/myzel**
-
 Als App installieren: Link im Handy-Browser öffnen → Menü ⋮ → „Zum Startbildschirm hinzufügen“.
 
-Incremental-Spiel über ein wachsendes Pilzgeflecht. Stand: Version 1.2 (Genom-Stufen, Tagesaufgaben).
+Myzel ist ein Incremental-/Idle-Spiel (Clicker) für Handy und Browser: Der Spieler lässt ein leuchtendes Pilzgeflecht vom ersten Sporenkorn über den Waldboden und den Wald bis über einen ganzen Kontinent wachsen. Stand: **Version 1.2.1** (Zonen 1–3, Sporenflug, Genom mit Stufen, Tagesaufgaben, Statistik).
+
+## Für eine neue KI-Sitzung / einen neuen Chat
+
+**Lies zuerst [`docs/UEBERGABE.md`](docs/UEBERGABE.md).** Dort steht alles, was man zum Weiterarbeiten braucht: wer was entscheidet, wie wir arbeiten, was gebaut ist, was als Nächstes kommt und welche Regeln gelten. Kurzfassung für Agenten auch in [`CLAUDE.md`](CLAUDE.md).
+
+## Dokumentation
+
+| Datei | Inhalt |
+| --- | --- |
+| [`docs/UEBERGABE.md`](docs/UEBERGABE.md) | **Einstieg:** Projekt, Rollen, Arbeitsweise, Stand, offene Punkte, Entscheidungen |
+| [`docs/SPIELDESIGN.md`](docs/SPIELDESIGN.md) | Alle Spielmechaniken, wie sie *jetzt* im Code umgesetzt sind |
+| [`docs/ARCHITEKTUR.md`](docs/ARCHITEKTUR.md) | Technik: Aufbau des Codes, Datenfluss, Spielstände, Darstellung, Build, Veröffentlichung |
+| [`docs/BALANCING.md`](docs/BALANCING.md) | Zielwerte, Simulation, bisherige Messergebnisse und Anpassungen |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Geplante und notierte Ideen in der vom Chef festgelegten Reihenfolge |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Alle Versionen und was sich geändert hat |
+
+## Befehle (Entwicklung)
+
+Benötigt [Bun](https://bun.sh) und TypeScript (`tsc`). Keine weiteren Pakete nötig.
 
 | Befehl | Zweck |
 | --- | --- |
-| `bun test` | Unit-Tests des Spielkerns |
+| `bun test` | Alle automatischen Tests (aktuell 104) |
 | `tsc --noEmit -p .` | Typprüfung |
-| `bun scripts/simulate.ts` | Balancing-Simulation (Bot spielt 3 Spielstile × 8 Karten) |
-| `bun scripts/build.ts` | Testversion `dist/index.html` (mit Tempo-Regler) |
-| `bun scripts/build.ts --release` | Release in `release/`: installierbare Web-App, offline spielbar, ohne Testwerkzeuge |
+| `bun scripts/simulate.ts` | Volle Balancing-Simulation (~6–10 Min.) |
+| `bun scripts/simulate.ts --quick` | Kurzfassung (~2 Min., läuft auch bei GitHub) |
+| `bun scripts/build.ts` | Testversion → `dist/index.html` (Tempo-Regler immer sichtbar) |
+| `bun scripts/build.ts --release` | Release → `release/` (Web-App mit Offline-Modus, Tempo-Regler nur über versteckten Entwicklermodus) |
 
-Veröffentlichung: Jeder Push auf `main` startet `.github/workflows/pages.yml` – Typprüfung, Tests und Simulation müssen grün sein, dann geht die Release-Version auf GitHub Pages.
-
-Aufbau: `src/core` = reine Spiellogik ohne Grafik (getestet), `src/ui` = Darstellung und Eingabe,
-`src/i18n` = alle Texte, `src/core/config.ts` = alle Balancing-Zahlen.
+**Veröffentlichung:** Jeder Push auf `main` startet `.github/workflows/pages.yml`: Typprüfung → Tests → Simulation (Kurzfassung) → Release-Build → GitHub Pages. Schlägt ein Schritt fehl, bleibt die alte Version online.
