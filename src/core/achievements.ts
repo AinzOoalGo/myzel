@@ -33,7 +33,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'gold_10', check: (s) => s.meta.lifetime.goldCaught >= 10 },
   { id: 'spore_1', check: (s) => s.meta.runs >= 1 },
   { id: 'spore_5', check: (s) => s.meta.runs >= 5 },
-  { id: 'genome_branch', check: (s) => ['z4', 's4', 'p4', 'w4'].some((id) => s.meta.genome.includes(id as never)) },
+  { id: 'genome_branch', check: (s) => ['z4', 's4', 'p4', 'w4', 'o4'].some((id) => s.meta.genome.includes(id as never)) },
   { id: 'genome_all', check: (s) => s.meta.genome.length >= CONFIG.genome.length },
   { id: 'genome_max', check: (s) => Object.values(s.meta.genomeLevels).some((l) => (l ?? 0) >= CONFIG.genomeMaxLevel) },
   { id: 'zone2', check: (s) => s.zone >= 2 },
@@ -48,6 +48,14 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'minerals_1k', check: (s) => s.meta.lifetime.minerals >= 1000 },
   { id: 'wind', check: (s) => s.meta.lifetime.windSeen >= 1 },
   { id: 'climates', check: (s) => new Set(s.nodes.filter((n) => n.connected && n.climate).map((n) => n.climate)).size === 3 },
+  // Zone 4 „Planet“
+  { id: 'zone4', check: (s) => s.zone >= 4 },
+  { id: 'ocean', check: (s) => s.nodes.some((n) => n.connected && n.zone === 4) },
+  { id: 'koralle', check: (s) => countType(s, 'koralle') >= 3 },
+  { id: 'vulkan', check: (s) => countType(s, 'vulkan') >= 1 },
+  { id: 'urwald', check: (s) => countType(s, 'urwald') >= 1 },
+  { id: 'boss', check: (s) => s.meta.lifetime.bossBeaten >= 1 },
+  { id: 'planet', check: (s) => s.meta.lifetime.planets >= 1 },
 ];
 
 /** Prüft alle Erfolge, trägt neue ein und gibt deren IDs zurück. */

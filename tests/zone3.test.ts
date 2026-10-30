@@ -228,6 +228,7 @@ describe('Erfolge und Spielstand v4', () => {
     s.levels.kristall = 3;
     s.levels.fern = 2;
     s.meta.genome.push('w1');
+    s.meta.lifetime.maxZone = 3;
     for (const r of s.rivals) r.nextAt = 0;
     simulate(s, 1800, 1);
     expect(deserialize(JSON.parse(JSON.stringify(serialize(s, 0))))).toEqual(s);
@@ -237,6 +238,6 @@ describe('Erfolge und Spielstand v4', () => {
     expect(s.edges.length).toBe(18);
     expect(s.res.minerals).toBe(0);
     expect(s.levels.kristall).toBe(0);
-    expect(s.rivals.length).toBe(CONFIG.zone2.rivals + CONFIG.zone3.rivals);
+    expect(s.rivals.length).toBe(CONFIG.zone2.rivals + CONFIG.zone3.rivals + 1); // + Riesen-Schleimpilz (Zone 4)
   });
 });

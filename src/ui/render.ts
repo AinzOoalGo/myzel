@@ -1,6 +1,6 @@
 import { CONFIG, type NodeType } from '../core/config';
-import { computeRates, findSource, growthSpeed, reach, season, type GameState } from '../core/game';
-import type { MapNode } from '../core/map';
+import { boss, computeRates, findSource, growthSpeed, reach, season, type GameState } from '../core/game';
+import { continentRadius, planetGeography, segmentCrossesOcean, type MapNode } from '../core/map';
 import { createRng } from '../core/rng';
 import { buildHypha, pointAt, subtreeSums, subtreeWeights, type Hypha, type Path } from './geometry';
 
@@ -21,12 +21,29 @@ export const NODE_COLORS: Record<NodeType, string> = {
   moor: '#3f8a80',
   mineral: '#7fd6e0',
   hexenring: '#e2b8ff',
+  vulkan: '#e2603a',
+  urwald: '#2f8a4a',
+  koralle: '#ff8fa3',
 };
+
+/** Riesen-Schleimpilz: leuchtend gelb (wie echte Schleimpilze) */
+const BOSS_COLOR = '#f2d24b';
 
 const GLOW_WARM = 'rgba(255,196,120,';
 const CORE = 'rgba(255,240,214,';
 const GLOW_RIVAL = 'rgba(150,100,255,';
 const CORE_RIVAL = 'rgba(215,190,255,';
+const GLOW_BOSS = 'rgba(255,210,60,';
+const CORE_BOSS = 'rgba(255,240,170,';
+const GLOW_SEA = 'rgba(80,180,255,';
+const CORE_SEA = 'rgba(205,240,255,';
+type Palette = 'mine' | 'rival' | 'boss' | 'sea';
+const PALETTES: Record<Palette, [string, string]> = {
+  mine: [GLOW_WARM, CORE],
+  rival: [GLOW_RIVAL, CORE_RIVAL],
+  boss: [GLOW_BOSS, CORE_BOSS],
+  sea: [GLOW_SEA, CORE_SEA],
+};
 
 interface Particle {
   x: number;
@@ -131,6 +148,9 @@ export class Renderer {
   private glowBlue = makeSprite('rgba(210,235,255,0.9)', 'rgba(80,150,230,0.25)');
   private glowGold = makeSprite('rgba(255,245,200,1)', 'rgba(255,190,40,0.45)');
   private glowRival = makeSprite('rgba(230,210,255,0.9)', 'rgba(140,90,255,0.3)');
+  private glowBoss = makeSprite('rgba(255,245,190,0.95)', 'rgba(255,200,40,0.35)');
+  private glowLava = makeSprite('rgba(255,220,160,1)', 'rgba(255,90,30,0.4)');
+  private glowPink = makeSprite('rgba(255,225,235,0.9)', 'rgba(255,110,150,0.3)');
   private soil: CanvasPattern | null;
   selected: number | null = null;
 
@@ -287,7 +307,7 @@ export class Renderer {
     // leere Totholz-Knoten und Baumversorgung ändern den Fluss, also gehören sie in den Schlüssel
     const empty = s.nodes.reduce((c, n) => c + (n.connected && n.type === 'totholz' && n.stock <= 0 ? 1 : 0), 0);
     const trees = computeRates(s).treeSupply > 0 ? 1 : 0;
-    const key = `${s.seed}|${s.zone}|${s.edges.length}|${s.levels.rhizo}|${s.growth ? s.growth.to : -1}|${rivalKey}|${s.meta.genome.length}:${Object.values(s.meta.genomeLevels).join('')}|${empty}|${trees}`;
+    const key = `${s.seed}|${s.zone}|${s.edges.length}|${s.levels.rhizo}|${s.levels.fern}|${s.levels.tiefsee}|${s.growth ? s.growth.to : -1}|${rivalKey}|${s.meta.genome.length}:${Object.values(s.meta.genomeLevels).join('')}|${empty}|${trees}`;
     if (key === this.cacheKey) return;
     this.cacheKey = key;
     const r = reach(s);
@@ -295,8 +315,15 @@ export class Renderer {
     const sight = r * 1.7;
     this.visible = [];
     this.sightAlpha.clear();
+    // der Riesen-Schleimpilz ist auf dem Planeten immer zu sehen – man soll wissen, wo er wächst
+    const bossIdx = s.zone >= 4 ? (() => { const b = boss(s); return b?.alive ? s.rivals.indexOf(b) + 1 : -1; })() : -1;
     for (const n of s.nodes) {
       if (n.zone > s.zone) continue;
+      if (bossIdx > 0 && n.owner === bossIdx) {
+        this.visible.push(n);
+        this.sightAlpha.set(n.id, 0.8);
+        continue;
+      }
       let d = Infinity;
       for (const c of connected) d = Math.min(d, Math.hypot(c.x - n.x, c.y - n.y));
       if (d > sight) continue;
@@ -307,10 +334,26 @@ export class Renderer {
     this.visibleIds = new Set(this.visible.map((n) => n.id));
     this.reachable = new Set(this.visible.filter((n) => !n.connected && findSource(s, n.id)).map((n) => n.id));
     this.rivalHyphae.clear();
+    this.bossHyphae.clear();
+    const b = boss(s);
+    this.bossOwner = b ? s.rivals.indexOf(b) + 1 : -1;
     for (const r of s.rivals) {
+      const target = r === b ? this.bossHyphae : this.rivalHyphae;
       for (const e of r.edges) {
         if (!this.visibleIds.has(e.from) && !this.visibleIds.has(e.to)) continue;
-        this.rivalHyphae.set(`${e.from}>${e.to}`, buildHypha(s.nodes[e.from]!, s.nodes[e.to]!));
+        target.set(`${e.from}>${e.to}`, buildHypha(s.nodes[e.from]!, s.nodes[e.to]!));
+      }
+    }
+    // Tiefsee-Fäden (über Wasser) bekommen eine eigene, kühle Farbe
+    if (s.zone >= 4) {
+      const geo = planetGeography(s.seed);
+      const coast = CONFIG.zone4.coast;
+      for (const e of s.edges) {
+        const k = `${e.from}>${e.to}`;
+        if (this.seaEdges.has(k)) continue;
+        const a = s.nodes[e.from]!;
+        const t = s.nodes[e.to]!;
+        if ((a.dist > coast || t.dist > coast) && segmentCrossesOcean(geo, a.x, a.y, t.x, t.y)) this.seaEdges.add(k);
       }
     }
     for (const e of s.edges) {
@@ -328,7 +371,7 @@ export class Renderer {
       const n = s.nodes[id];
       if (!n) return 0;
       if (n.type === 'totholz') return n.stock > 0 ? 1 : 0;
-      if (n.type === 'baum' || n.type === 'altbaum') return supplied ? 1 : 0;
+      if (n.type === 'baum' || n.type === 'altbaum' || n.type === 'urwald' || n.type === 'vulkan') return supplied ? 1 : 0;
       return n.type === 'stein' ? 0 : 1;
     });
     if (s.growth) {
@@ -341,6 +384,7 @@ export class Renderer {
   reset(): void {
     this.cacheKey = '';
     this.hyphae.clear();
+    this.seaEdges.clear();
     this.camReady = false;
     this.resetView();
   }
@@ -415,10 +459,103 @@ export class Renderer {
   // ---------- Zeichnen ----------
 
   private zoneNow = 1;
+  private bossOwner = -1;
+  private bossHyphae = new Map<string, Hypha>();
+  private seaEdges = new Set<string>();
+
+  /** Meer und Landmassen (ab Zone 3 sichtbar: am Rand des Kontinents beginnt das Meer) */
+  private geoCache: { seed: number; land: Path2D; sea: Path2D; outer: number } | null = null;
+  private stars: [number, number, number, number][] | null = null;
+  private drawOcean(s: GameState, px: number, time: number): void {
+    if (s.zone < 3) return;
+    if (this.geoCache?.seed !== s.seed) {
+      const land = new Path2D();
+      const outerR = CONFIG.zone4.outerRadius + 4000;
+      // Meer als ein Pfad mit Löchern (gerade-ungerade-Regel): äußerer Kreis, darin Heimat und Kontinente –
+      // die Landmassen überlappen sich nie, darum reicht das, und der Boden muss nicht neu kopiert werden
+      const sea = new Path2D();
+      sea.arc(0, 0, outerR, 0, Math.PI * 2);
+      sea.moveTo(CONFIG.zone4.coast, 0);
+      sea.arc(0, 0, CONFIG.zone4.coast, 0, Math.PI * 2);
+      land.arc(0, 0, CONFIG.zone4.coast, 0, Math.PI * 2);
+      for (const c of planetGeography(s.seed)) {
+        const steps = 72;
+        for (let i = 0; i <= steps; i++) {
+          const a = (i / steps) * Math.PI * 2;
+          const rr = continentRadius(c, a);
+          const x = c.x + Math.cos(a) * rr;
+          const y = c.y + Math.sin(a) * rr;
+          if (i === 0) {
+            land.moveTo(x, y);
+            sea.moveTo(x, y);
+          } else {
+            land.lineTo(x, y);
+            sea.lineTo(x, y);
+          }
+        }
+        land.closePath();
+        sea.closePath();
+      }
+      this.geoCache = { seed: s.seed, land, sea, outer: outerR };
+    }
+    const { ctx } = this;
+    const { land, sea, outer } = this.geoCache;
+    // auf dem Planeten: außen herum der dunkle Weltraum mit Sternen
+    if (s.zone >= 4) {
+      // nur außerhalb des Planeten (Ring zwischen riesigem Kreis und Planetenrand) – Land behält seinen Boden
+      ctx.fillStyle = '#05060a';
+      ctx.beginPath();
+      ctx.arc(0, 0, outer * 20, 0, Math.PI * 2);
+      ctx.moveTo(outer, 0);
+      ctx.arc(0, 0, outer, 0, Math.PI * 2);
+      ctx.fill('evenodd');
+      if (!this.stars) {
+        const rng = createRng(31337);
+        this.stars = Array.from({ length: 260 }, () => {
+          const a = rng() * Math.PI * 2;
+          const d = outer + 300 + Math.sqrt(rng()) * 60000;
+          return [Math.cos(a) * d, Math.sin(a) * d, 0.6 + rng() * 1.4, rng()] as [number, number, number, number];
+        });
+      }
+      for (const [x, y, sz, tw] of this.stars) {
+        ctx.fillStyle = `rgba(230,235,255,${0.35 + 0.4 * Math.abs(Math.sin(time * 0.5 + tw * 9))})`;
+        ctx.fillRect(x, y, sz * px * 1.6, sz * px * 1.6);
+      }
+      // Atmosphäre: zarter Lichtsaum um den Planeten
+      ctx.strokeStyle = 'rgba(120,180,255,0.18)';
+      ctx.lineWidth = 14 * px;
+      ctx.beginPath();
+      ctx.arc(0, 0, outer + 6 * px, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // tiefes Wasser (Land bleibt ausgespart)
+    ctx.fillStyle = '#0a1a26';
+    ctx.fill(sea, 'evenodd');
+    // Wellen: wenige, langsam wandernde Ringe – nur übers Wasser
+    if (!this.reducedMotion && this.quality === 'high') {
+      ctx.save();
+      ctx.clip(sea, 'evenodd');
+      ctx.strokeStyle = 'rgba(90,170,220,0.06)';
+      ctx.lineWidth = 3 * px;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const rr = CONFIG.zone4.coast + ((i * 1500 + time * 60) % 9000);
+        ctx.moveTo(rr, 0);
+        ctx.arc(0, 0, rr, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Küstenlinie
+    ctx.strokeStyle = 'rgba(140,210,220,0.28)';
+    ctx.lineWidth = Math.max(2 * px, 6);
+    ctx.stroke(land);
+  }
 
   draw(s: GameState, dt: number, time: number): void {
     this.zoneNow = s.zone;
-    this.panLimit = s.zone >= 3 ? CONFIG.zone3.outerRadius : s.zone >= 2 ? CONFIG.zone2.outerRadius : CONFIG.map.radius;
+    this.panLimit =
+      s.zone >= 4 ? CONFIG.zone4.outerRadius : s.zone >= 3 ? CONFIG.zone3.outerRadius : s.zone >= 2 ? CONFIG.zone2.outerRadius : CONFIG.map.radius;
     this.watchPerformance(dt);
     this.refresh(s);
     this.updateCamera(s, dt);
@@ -433,6 +570,7 @@ export class Renderer {
     ctx.globalCompositeOperation = 'source-over';
     if (this.bg) ctx.drawImage(this.bg, 0, 0);
     this.applyWorld();
+    this.drawOcean(s, px, time);
 
     // Steine und unverbundene Knoten unter den Fäden
     for (const n of this.visible) if (!n.connected) this.drawNode(n, time, px);
@@ -443,15 +581,19 @@ export class Renderer {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     const boost = 1 + this.energy * 0.7;
-    this.strokeNetwork([...this.rivalHyphae.values()].map((h) => ({ h, width: 2.2 })), 1, px, true);
+    this.strokeNetwork([...this.rivalHyphae.values()].map((h) => ({ h, width: 2.2 })), 1, px, 'rival');
+    this.strokeNetwork([...this.bossHyphae.values()].map((h) => ({ h, width: 3.2 })), 1 + Math.sin(time * 2) * 0.15, px, 'boss');
     const mine: { h: Hypha; width: number; dim: boolean }[] = [];
+    const sea: { h: Hypha; width: number; dim: boolean }[] = [];
     for (const e of s.edges) {
-      const h = this.hyphae.get(`${e.from}>${e.to}`);
+      const k = `${e.from}>${e.to}`;
+      const h = this.hyphae.get(k);
       if (!h) continue;
       const wgt = this.weights.get(e.to) ?? 1;
-      mine.push({ h, width: 1.6 + Math.log2(wgt) * 0.9, dim: (this.flows.get(e.to) ?? 0) === 0 });
+      (this.seaEdges.has(k) ? sea : mine).push({ h, width: 1.6 + Math.log2(wgt) * 0.9, dim: (this.flows.get(e.to) ?? 0) === 0 });
     }
-    this.strokeNetwork(mine, boost, px, false);
+    this.strokeNetwork(mine, boost, px, 'mine');
+    this.strokeNetwork(sea, boost, px, 'sea');
     if (s.growth && this.growthPath) {
       const h = this.growthPath.hypha;
       const len = Math.min(1, s.growth.progress / s.growth.length) * h.main.total;
@@ -462,7 +604,7 @@ export class Renderer {
       this.tracePath(h.main, h.main.total);
       ctx.stroke();
       ctx.setLineDash([]);
-      this.strokeHypha(h, len, 1.8, boost * 1.2, px);
+      this.strokeHypha(h, len, 1.8, boost * 1.2, px, s.growth.ocean ? 'sea' : 'mine');
       const [tx, ty] = pointAt(h.main, len);
       const pulse = 22 + Math.sin(time * 9) * 5;
       this.sprite(this.glowWarm, tx, ty, pulse * px * 2.2, 0.95);
@@ -701,11 +843,11 @@ export class Renderer {
    * Fertige Fäden gebündelt zeichnen: gleiche Dicken landen in einem Pfad,
    * so gibt es nur wenige Zeichenaufrufe statt drei pro Faden.
    */
-  private strokeNetwork(items: { h: Hypha; width: number; dim?: boolean }[], boost: number, px: number, rival: boolean): void {
+  private strokeNetwork(items: { h: Hypha; width: number; dim?: boolean }[], boost: number, px: number, palette: Palette): void {
     if (!items.length) return;
     const { ctx } = this;
-    const glow = rival ? GLOW_RIVAL : GLOW_WARM;
-    const core = rival ? CORE_RIVAL : CORE;
+    const rival = palette === 'rival' || palette === 'boss';
+    const [glow, core] = PALETTES[palette];
     const buckets = new Map<number, Path2D>();
     const hairs = new Path2D();
     let anyHairs = false;
@@ -767,10 +909,9 @@ export class Renderer {
   }
 
   /** Drei Lagen: breiter Schein, mittlerer Schein, heller Kern. */
-  private strokeHypha(h: Hypha, upTo: number, width: number, boost: number, px: number, rival = false): void {
+  private strokeHypha(h: Hypha, upTo: number, width: number, boost: number, px: number, palette: Palette = 'mine'): void {
     const { ctx } = this;
-    const glow = rival ? GLOW_RIVAL : GLOW_WARM;
-    const core = rival ? CORE_RIVAL : CORE;
+    const [glow, core] = PALETTES[palette];
     width = Math.max(width, 1.2 * px);
     this.tracePath(h.main, upTo);
     ctx.strokeStyle = `${glow}${0.07 * boost})`;
@@ -806,7 +947,7 @@ export class Renderer {
     // sehr klein auf dem Bildschirm: nur ein Punkt (spart beim Herauszoomen viel Zeichenarbeit)
     if (r < 2.5 * px && n.type !== 'spore') {
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = n.owner > 0 ? NODE_COLORS.rivale : NODE_COLORS[n.type];
+      ctx.fillStyle = n.owner > 0 ? (n.owner === this.bossOwner ? BOSS_COLOR : NODE_COLORS.rivale) : NODE_COLORS[n.type];
       const d = n.connected ? 2.6 * px : 2 * px;
       ctx.fillRect(n.x - d / 2, n.y - d / 2, d, d);
       ctx.globalAlpha = 1;
@@ -917,6 +1058,10 @@ export class Renderer {
         break;
       }
       case 'rivale': {
+        if (n.zone === 4) {
+          this.drawBoss(n, r, time);
+          break;
+        }
         ctx.globalCompositeOperation = 'lighter';
         this.sprite(this.glowRival, n.x, n.y, r * 5 * (1 + Math.sin(time * 1.7 + n.id) * 0.08), n.owner > 0 ? 0.8 : 0.2);
         ctx.globalCompositeOperation = 'source-over';
@@ -1043,6 +1188,109 @@ export class Renderer {
         ctx.fill();
         break;
       }
+      case 'vulkan': {
+        const hot = 0.6 + Math.sin(time * 1.8 + n.id) * 0.25;
+        if (n.connected) {
+          ctx.globalCompositeOperation = 'lighter';
+          this.sprite(this.glowLava, n.x, n.y - r * 0.5, r * 4, 0.5 * hot);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        // Kegel
+        ctx.fillStyle = '#3a2a24';
+        ctx.beginPath();
+        ctx.moveTo(n.x - r * 1.3, n.y + r * 0.7);
+        ctx.lineTo(n.x - r * 0.35, n.y - r * 0.75);
+        ctx.lineTo(n.x + r * 0.35, n.y - r * 0.75);
+        ctx.lineTo(n.x + r * 1.3, n.y + r * 0.7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#56403a';
+        ctx.beginPath();
+        ctx.moveTo(n.x - r * 0.9, n.y + r * 0.7);
+        ctx.lineTo(n.x - r * 0.3, n.y - r * 0.7);
+        ctx.lineTo(n.x - r * 0.05, n.y - r * 0.7);
+        ctx.lineTo(n.x - r * 0.2, n.y + r * 0.7);
+        ctx.closePath();
+        ctx.fill();
+        // glühender Krater und Lavastrom
+        ctx.fillStyle = `rgba(255,${Math.round(110 + 60 * hot)},50,${0.85})`;
+        ctx.beginPath();
+        ctx.ellipse(n.x, n.y - r * 0.75, r * 0.36, r * 0.14, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = NODE_COLORS.vulkan;
+        ctx.lineWidth = Math.max(0.8 * px, r * 0.12);
+        ctx.beginPath();
+        ctx.moveTo(n.x + r * 0.1, n.y - r * 0.7);
+        ctx.quadraticCurveTo(n.x + r * 0.35, n.y - r * 0.1, n.x + r * 0.25, n.y + r * 0.55);
+        ctx.stroke();
+        break;
+      }
+      case 'urwald': {
+        if (n.connected) {
+          ctx.globalCompositeOperation = 'lighter';
+          this.sprite(this.glowGreen, n.x, n.y, r * 5.5, 0.55);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        // Brettwurzeln
+        ctx.strokeStyle = '#33241a';
+        ctx.lineWidth = Math.max(px, r * 0.13);
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2 + rng() * 0.4;
+          const l = r * (1.25 + rng() * 0.4);
+          ctx.beginPath();
+          ctx.moveTo(n.x, n.y);
+          ctx.quadraticCurveTo(n.x + Math.cos(a - 0.4) * l * 0.5, n.y + Math.sin(a - 0.4) * l * 0.5, n.x + Math.cos(a) * l, n.y + Math.sin(a) * l);
+          ctx.stroke();
+        }
+        // mehrere Kronen übereinander
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2 + 0.4;
+          ctx.fillStyle = i % 2 ? '#1d5a32' : '#24683a';
+          ctx.beginPath();
+          ctx.arc(n.x + Math.cos(a) * r * 0.45, n.y + Math.sin(a) * r * 0.45, r * 0.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = NODE_COLORS.urwald;
+        ctx.beginPath();
+        ctx.arc(n.x - r * 0.1, n.y - r * 0.1, r * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#6fc486';
+        ctx.beginPath();
+        ctx.arc(n.x - r * 0.3, n.y - r * 0.3, r * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'koralle': {
+        if (n.connected) {
+          ctx.globalCompositeOperation = 'lighter';
+          this.sprite(this.glowPink, n.x, n.y, r * 4.2, 0.4 + Math.sin(time * 1.4 + n.id) * 0.1);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        // Riff im Wasser: helle Lagune
+        ctx.fillStyle = 'rgba(60,150,170,0.45)';
+        ctx.beginPath();
+        ctx.ellipse(n.x, n.y, r * 1.25, r * 0.9, rng(), 0, Math.PI * 2);
+        ctx.fill();
+        // verzweigte Korallen
+        ctx.strokeStyle = NODE_COLORS.koralle;
+        ctx.lineCap = 'round';
+        ctx.lineWidth = Math.max(0.9 * px, r * 0.13);
+        for (let i = 0; i < 4; i++) {
+          const bx = n.x + (rng() - 0.5) * r;
+          const by = n.y + r * 0.45;
+          const h = r * (0.6 + rng() * 0.5);
+          const lean = (rng() - 0.5) * r * 0.4;
+          ctx.beginPath();
+          ctx.moveTo(bx, by);
+          ctx.lineTo(bx + lean, by - h);
+          ctx.moveTo(bx + lean * 0.5, by - h * 0.5);
+          ctx.lineTo(bx + lean * 0.5 - r * 0.25, by - h * 0.8);
+          ctx.moveTo(bx + lean * 0.6, by - h * 0.6);
+          ctx.lineTo(bx + lean * 0.6 + r * 0.22, by - h * 0.9);
+          ctx.stroke();
+        }
+        break;
+      }
       case 'stein': {
         const pts: [number, number][] = [];
         for (let i = 0; i < 7; i++) {
@@ -1071,8 +1319,9 @@ export class Renderer {
     // Ringe nur sammeln – gezeichnet werden sie gebündelt in einem Aufruf (flushRings)
     if (n.owner > 0 && n.type !== 'rivale' && r >= 3 * px) {
       const rr = r * 1.1 + 2 * px;
-      this.ownedRings.moveTo(n.x + rr, n.y);
-      this.ownedRings.arc(n.x, n.y, rr, 0, Math.PI * 2);
+      const ring = n.owner === this.bossOwner ? this.bossRings : this.ownedRings;
+      ring.moveTo(n.x + rr, n.y);
+      ring.arc(n.x, n.y, rr, 0, Math.PI * 2);
     }
     if (this.reachable.has(n.id) && r >= 3 * px) {
       const rr = r * (n.type === 'totholz' ? 1.35 : 1.15) + 4 * px;
@@ -1082,12 +1331,16 @@ export class Renderer {
   }
 
   private ownedRings = new Path2D();
+  private bossRings = new Path2D();
   private reachRings = new Path2D();
   private flushRings(time: number, px: number): void {
     const { ctx } = this;
     ctx.strokeStyle = 'rgba(180,140,255,0.9)';
     ctx.lineWidth = 2 * px;
     ctx.stroke(this.ownedRings);
+    ctx.strokeStyle = 'rgba(255,215,80,0.9)';
+    ctx.stroke(this.bossRings);
+    this.bossRings = new Path2D();
     ctx.setLineDash([4 * px, 4 * px]);
     ctx.lineDashOffset = -time * 8 * px;
     ctx.strokeStyle = 'rgba(255,236,200,0.85)';
@@ -1097,6 +1350,53 @@ export class Renderer {
     ctx.lineDashOffset = 0;
     this.ownedRings = new Path2D();
     this.reachRings = new Path2D();
+  }
+
+  /** Riesen-Schleimpilz: gelber, pulsierender Klumpen mit kriechenden Ausläufern. */
+  private drawBoss(n: MapNode, r: number, time: number): void {
+    const { ctx } = this;
+    const alive = n.owner > 0;
+    ctx.globalCompositeOperation = 'lighter';
+    this.sprite(this.glowBoss, n.x, n.y, r * 6 * (1 + Math.sin(time * 1.2) * 0.1), alive ? 0.85 : 0.15);
+    ctx.globalCompositeOperation = 'source-over';
+    const body = alive ? '#c9a21e' : '#4a4236';
+    const top = alive ? BOSS_COLOR : '#6a5e52';
+    // Ausläufer (Pseudopodien)
+    ctx.strokeStyle = body;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = r * 0.16;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + Math.sin(time * 0.6 + i) * 0.15;
+      const l = r * (1.2 + 0.25 * Math.sin(time * 0.9 + i * 1.7));
+      ctx.beginPath();
+      ctx.moveTo(n.x, n.y);
+      ctx.quadraticCurveTo(n.x + Math.cos(a + 0.5) * l * 0.6, n.y + Math.sin(a + 0.5) * l * 0.6, n.x + Math.cos(a) * l, n.y + Math.sin(a) * l);
+      ctx.stroke();
+    }
+    // Körper: welliger Klumpen
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    for (let i = 0; i <= 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const rr = r * (0.8 + 0.12 * Math.sin(i * 2.7 + time * 1.5));
+      ctx.lineTo(n.x + Math.cos(a) * rr, n.y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = top;
+    ctx.beginPath();
+    ctx.arc(n.x - r * 0.12, n.y - r * 0.12, r * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,220,0.6)';
+    ctx.beginPath();
+    ctx.arc(n.x - r * 0.3, n.y - r * 0.3, r * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /** Abspann: Kamera fährt langsam ganz heraus, damit man den ganzen Planeten sieht. */
+  showWholePlanet(): void {
+    this.userPan = { x: -this.auto.x, y: -this.auto.y };
+    this.userZoom = Math.max(0.5, Math.min(1, (Math.min(this.w, this.h) / (2 * (CONFIG.zone4.outerRadius + 1500))) / Math.max(this.auto.scale, 1e-9)));
   }
 
   /** Für die Anzeige der Wachstumsdauer. */

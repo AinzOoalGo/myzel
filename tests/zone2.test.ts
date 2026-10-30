@@ -220,7 +220,7 @@ describe('Spielstand v3', () => {
   it('lädt weiterhin einen v1-Spielstand', () => {
     const s = deserialize(v1Save);
     expect(s.zone).toBe(1);
-    expect(s.rivals.length).toBe(CONFIG.zone2.rivals + CONFIG.zone3.rivals);
+    expect(s.rivals.length).toBe(CONFIG.zone2.rivals + CONFIG.zone3.rivals + 1); // + Riesen-Schleimpilz (Zone 4)
     expect(s.edges.length).toBe(18);
   });
 });

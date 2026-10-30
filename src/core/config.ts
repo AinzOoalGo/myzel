@@ -19,13 +19,18 @@ export type NodeType =
   | 'rivale'
   | 'moor'
   | 'mineral'
-  | 'hexenring';
-export type Zone = 1 | 2 | 3;
+  | 'hexenring'
+  | 'vulkan'
+  | 'urwald'
+  | 'koralle';
+export type Zone = 1 | 2 | 3 | 4;
 export type Climate = 'tropen' | 'steppe' | 'taiga';
 export type Season = 'fruehling' | 'sommer' | 'herbst' | 'winter';
-export type UpgradeId = 'hyphen' | 'enzym' | 'frucht' | 'rhizo' | 'kristall' | 'fern';
-export type GenomeId = 'z1' | 'z2' | 'z3' | 'z4' | 's1' | 's2' | 's3' | 's4' | 'p1' | 'p2' | 'p3' | 'p4' | 'w1' | 'w2' | 'w3' | 'w4';
-export type Branch = 'zersetzer' | 'symbiont' | 'pionier' | 'wanderer';
+export type UpgradeId = 'hyphen' | 'enzym' | 'frucht' | 'rhizo' | 'kristall' | 'fern' | 'tiefsee' | 'planet';
+export type GenomeId =
+  | 'z1' | 'z2' | 'z3' | 'z4' | 's1' | 's2' | 's3' | 's4' | 'p1' | 'p2' | 'p3' | 'p4' | 'w1' | 'w2' | 'w3' | 'w4'
+  | 'o1' | 'o2' | 'o3' | 'o4';
+export type Branch = 'zersetzer' | 'symbiont' | 'pionier' | 'wanderer' | 'weltenpilz';
 export type EventType = 'regen' | 'duerre' | 'gold' | 'wind';
 
 export interface GenomeDef {
@@ -46,7 +51,7 @@ export interface UpgradeDef {
   baseCost: Cost;
   growth: number; // Kostenfaktor pro Stufe
   /** erst sichtbar, wenn die Ressource freigeschaltet ist */
-  unlock: 'none' | 'sugar' | 'minerals';
+  unlock: 'none' | 'sugar' | 'minerals' | 'zone4';
 }
 
 export const CONFIG = {
@@ -73,6 +78,9 @@ export const CONFIG = {
       moor: 16,
       mineral: 14,
       hexenring: 18,
+      vulkan: 26,
+      urwald: 30,
+      koralle: 16,
     } as Record<NodeType, number>,
   },
 
@@ -134,6 +142,62 @@ export const CONFIG = {
     hexenring: { sporeBonus: 0.25 }, // +25 % Sporen beim nächsten Sporenflug
   },
 
+  /**
+   * Zone 4 „Planet“: Landmassen (Kontinente) in einem riesigen Ring, dazwischen Ozean.
+   * Fäden über Wasser sind „Tiefsee-Fäden“: nur mit dem Upgrade Tiefsee-Hyphen, teurer und langsamer.
+   * Wieder angehängt mit eigenem Zufall – Zone 1–3 bleiben unverändert.
+   */
+  zone4: {
+    unlockAt: 100,
+    goal: 150,
+    innerRadius: 6900,
+    outerRadius: 15500,
+    /** ab hier beginnt um den Heimatkontinent herum das Meer */
+    coast: 6650,
+    continents: 5,
+    continentDist: [9800, 11600] as [number, number],
+    continentRadius: [2700, 3400] as [number, number],
+    /** Mindestbreite des Meeres zwischen Heimatkontinent und jeder Landmasse */
+    minStrait: 400,
+    landNodes: 190,
+    reefNodes: 30,
+    /** Riff-Kette zu jedem Kontinent: Abstand der Riffe und seitliche Abweichung */
+    reefChainStep: 800,
+    reefChainJitter: 150,
+    minSpacing: 620,
+    sizeScale: 5.5,
+    weights: { laub: 24, totholz: 15, feucht: 6, moor: 7, baum: 7, altbaum: 6, mineral: 9, hexenring: 2, vulkan: 6, urwald: 6, stein: 12 } as Record<
+      'laub' | 'totholz' | 'feucht' | 'moor' | 'baum' | 'altbaum' | 'mineral' | 'hexenring' | 'vulkan' | 'urwald' | 'stein',
+      number
+    >,
+    reachBonus: 700, // zusätzlich zu Zone 2 + 3
+    speedBonus: 2,
+    costPerNode: 1.07,
+    /** Tiefsee-Fäden: Kosten ×4 (Upgrade-Stufen senken das), Tempo ×0,5 */
+    oceanCost: 4,
+    oceanCostPerLevel: 0.85,
+    oceanSpeed: 0.5,
+    /** Prüfabstand beim Abtasten eines Fadens über Wasser */
+    oceanSample: 120,
+    /** Riesen-Schleimpilz (Endgegner) */
+    boss: {
+      reach: 1300,
+      maxReach: 3200,
+      reachStep: 300,
+      interval: 75,
+      offlineInterval: 150,
+      coreCost: 10, // Kern angreifen kostet ×10
+      rewardSeconds: 1800, // 30 Min. Produktion
+    },
+  },
+
+  /** neue Knoten in Zone 4 */
+  zone4Nodes: {
+    vulkan: { waterUse: 0.8, min: 2.5 }, // heiß: braucht Wasser zum Kühlen, liefert viele Mineralien
+    urwald: { waterUse: 1.6, sugar: 5 },
+    koralle: { nps: 0.7, water: 0.4 },
+  },
+
   rivals: {
     interval: 120, // Sekunden zwischen zwei Eroberungen eines Rivalen
     offlineInterval: 240,
@@ -177,6 +241,7 @@ export const CONFIG = {
     feucht: { water: 0.35 },
     baum: { waterUse: 0.2, sugar: 0.25 },
     altbaum: { waterUse: 0.5, sugar: 1.2 },
+    urwald: { waterUse: 1.6, sugar: 5 },
   },
 
   waterCap: 100,
@@ -188,6 +253,8 @@ export const CONFIG = {
     { id: 'rhizo', baseCost: { n: 250, sugar: 10, min: 0 }, growth: 1.3, unlock: 'sugar' },
     { id: 'kristall', baseCost: { n: 0, sugar: 0, min: 40 }, growth: 1.55, unlock: 'minerals' },
     { id: 'fern', baseCost: { n: 0, sugar: 0, min: 25 }, growth: 1.7, unlock: 'minerals' },
+    { id: 'tiefsee', baseCost: { n: 0, sugar: 1500, min: 0 }, growth: 2.5, unlock: 'zone4' },
+    { id: 'planet', baseCost: { n: 0, sugar: 3000, min: 600 }, growth: 1.7, unlock: 'zone4' },
   ] as UpgradeDef[],
 
   effects: {
@@ -198,6 +265,7 @@ export const CONFIG = {
     rhizoSpeed: 0.25, // +25 % Wachstumstempo pro Stufe
     kristallGlobal: 0.25, // +25 % auf alle Nährstoffe pro Stufe (multiplikativ)
     fernReach: 120, // +120 Reichweite pro Stufe
+    planetGlobal: 0.3, // Planetennetz: alle Nährstoffe ×1,3 pro Stufe (multiplikativ)
   },
 
   /** Ziel des Prototyps (Zone 1). */
@@ -214,6 +282,8 @@ export const CONFIG = {
     softCap: 150,
     /** Über der Grenze: Grenze × (roh / Grenze) ^ Exponent – 600 roh → 300, 2400 roh → 600 */
     softCapExp: 0.5,
+    /** zweite Stufe (seit 1.3, späte Planeten-Flüge): über 2.000 noch einmal gedämpft – 8.000 → 4.000 */
+    softCap2: 2000,
   },
 
   genome: [
@@ -233,6 +303,11 @@ export const CONFIG = {
     { id: 'w2', branch: 'wanderer', tier: 2, cost: 30 },
     { id: 'w3', branch: 'wanderer', tier: 3, cost: 50 },
     { id: 'w4', branch: 'wanderer', tier: 4, cost: 80 },
+    // Weltenpilz: erst nach dem ersten Besuch auf dem Planeten (Zone 4)
+    { id: 'o1', branch: 'weltenpilz', tier: 1, cost: 40 },
+    { id: 'o2', branch: 'weltenpilz', tier: 2, cost: 80 },
+    { id: 'o3', branch: 'weltenpilz', tier: 3, cost: 150 },
+    { id: 'o4', branch: 'weltenpilz', tier: 4, cost: 250 },
   ] as GenomeDef[],
 
   /** Jede Mutation lässt sich bis zu dieser Stufe verbessern; jede Stufe kostet ×costGrowth mehr. */
@@ -261,6 +336,10 @@ export const CONFIG = {
     w2Min: 2, // Mineralien ×2
     w3Hex: 2, // Hexenringe wirken doppelt
     w4PerNode: 0.01, // +1 % Nährstoffe je verbundenem Knoten
+    o1Ocean: 0.7, // Tiefsee-Fäden ×0,7 Kosten (abnehmend wie „Leichte Fäden“)
+    o2Vulkan: 2, // Vulkane ×2 Mineralien
+    o3Planet: 2, // Urwald-Riesen und Korallenriffe ×2
+    o4Boss: 0.5, // Schleimpilz wächst langsamer (+50 % Wartezeit je Stufe)
   },
 
   events: {

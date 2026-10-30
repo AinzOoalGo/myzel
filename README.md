@@ -3,7 +3,7 @@
 **▶ Jetzt spielen: https://ainzooalgo.github.io/myzel**
 Als App installieren: Link im Handy-Browser öffnen → Menü ⋮ → „Zum Startbildschirm hinzufügen“.
 
-Myzel ist ein Incremental-/Idle-Spiel (Clicker) für Handy und Browser: Der Spieler lässt ein leuchtendes Pilzgeflecht vom ersten Sporenkorn über den Waldboden und den Wald bis über einen ganzen Kontinent wachsen. Stand: **Version 1.2.1** (Zonen 1–3, Sporenflug, Genom mit Stufen, Tagesaufgaben, Statistik).
+Myzel ist ein Incremental-/Idle-Spiel (Clicker) für Handy und Browser: Der Spieler lässt ein leuchtendes Pilzgeflecht vom ersten Sporenkorn über den Waldboden, den Wald und einen Kontinent bis um den ganzen Planeten wachsen. Stand: **Version 1.3** (Zonen 1–4 mit Meer, Endgegner und Abspann, Sporenflug, Genom mit Stufen, Tagesaufgaben, Statistik).
 
 ## Für eine neue KI-Sitzung / einen neuen Chat
 
@@ -26,7 +26,7 @@ Benötigt [Bun](https://bun.sh) und TypeScript (`tsc`). Keine weiteren Pakete n�
 
 | Befehl | Zweck |
 | --- | --- |
-| `bun test` | Alle automatischen Tests (aktuell 104) |
+| `bun test` | Alle automatischen Tests (aktuell 121) |
 | `tsc --noEmit -p .` | Typprüfung |
 | `bun scripts/simulate.ts` | Volle Balancing-Simulation (~6–10 Min.) |
 | `bun scripts/simulate.ts --quick` | Kurzfassung (~2 Min., läuft auch bei GitHub) |

@@ -2,8 +2,11 @@ import { CONFIG, RELEASE, type Branch, type GenomeId, type UpgradeId } from './c
 import { ACHIEVEMENTS, checkAchievements } from './core/achievements';
 import { claimQuest, dayKey, questDone, questReward, rollDaily, type Quest } from './core/daily';
 import {
+  boss,
   buyGenome,
   canPrestige,
+  treeSugar,
+  waterUseOf,
   catchGolden,
   genomeAvailable,
   genomeCost,
@@ -12,7 +15,6 @@ import {
   nodeYield,
   nodeWater,
   nodeMinerals,
-  climateOf,
   hexBonus,
   mineralsUnlocked,
   upgradeUnlocked,
@@ -25,7 +27,6 @@ import {
   buy,
   computeRates,
   connectedCount,
-  distanceBonus,
   growthQuote,
   newGame,
   startGrowth,
@@ -126,7 +127,7 @@ const lockedEl = $('#locked');
 const modalEl = $('#modal');
 const modalBox = $('#modal .box');
 
-const UPGRADE_IDS: UpgradeId[] = ['hyphen', 'enzym', 'frucht', 'rhizo', 'kristall', 'fern'];
+const UPGRADE_IDS: UpgradeId[] = ['hyphen', 'enzym', 'frucht', 'rhizo', 'kristall', 'fern', 'tiefsee', 'planet'];
 const upgradeRows = new Map<UpgradeId, { row: HTMLElement; level: HTMLElement; btn: HTMLButtonElement }>();
 
 function buildUpgrades(): void {
@@ -160,7 +161,6 @@ function costLabel(c: { n: number; sugar: number; min: number }): string {
 
 function nodeDetails(id: number): string {
   const n = state.nodes[id]!;
-  const b = distanceBonus(n);
   const m = mods(state);
   switch (n.type) {
     case 'laub':
@@ -178,7 +178,12 @@ function nodeDetails(id: number): string {
       return t('yield_hex', { v: fmt(CONFIG.zone3Nodes.hexenring.sporeBonus * m.hex * 100) });
     case 'baum':
     case 'altbaum':
-      return t('yield_sugar', { v: fmt(CONFIG.nodes[n.type].sugar * b * m.sugar * climateOf(n).yield), w: fmt(CONFIG.nodes[n.type].waterUse) });
+    case 'urwald':
+      return t('yield_sugar', { v: fmt(treeSugar(n, m)), w: fmt(waterUseOf(n)) });
+    case 'vulkan':
+      return t('yield_vulkan', { v: fmt(nodeMinerals(n, m)), w: fmt(waterUseOf(n)) });
+    case 'koralle':
+      return `${t('yield_n', { v: fmt(nodeYield(state, n, m)) })} · ${t('yield_water', { v: fmt(nodeWater(n, m)) })}`;
     case 'rivale':
       return n.connected ? t('yield_n', { v: fmt(nodeYield(state, n, m)) }) : '';
     default:
@@ -200,9 +205,21 @@ function renderCard(): void {
     cardEl.hidden = false;
     cardEl.innerHTML = `<div class="card-head"><span class="dot"></span><strong></strong><button class="x" aria-label="${t('close')}">×</button></div><div class="card-desc"></div><div class="card-yield"></div><button class="grow"></button><div class="card-why"></div>`;
     cardEl.querySelector<HTMLElement>('.dot')!.style.background = NODE_COLORS[n.type];
-    cardEl.querySelector('strong')!.textContent = t(`node_${n.type}` as TextKey);
-    const descKey: TextKey =
-      n.type === 'rivale' && n.connected ? 'desc_rivale_beaten' : n.owner > 0 && n.type !== 'rivale' ? 'desc_owned' : (`desc_${n.type}` as TextKey);
+    const isBoss = n.type === 'rivale' && n.zone === 4;
+    const bossOwned = n.owner > 0 && n.type !== 'rivale' && state.nodes[state.rivals[n.owner - 1]?.core ?? -1]?.zone === 4;
+    if (isBoss || bossOwned) cardEl.querySelector<HTMLElement>('.dot')!.style.background = '#f2d24b';
+    cardEl.querySelector('strong')!.textContent = t(isBoss ? 'node_boss' : (`node_${n.type}` as TextKey));
+    const descKey: TextKey = isBoss
+      ? n.connected
+        ? 'desc_boss_beaten'
+        : 'desc_boss'
+      : n.type === 'rivale' && n.connected
+        ? 'desc_rivale_beaten'
+        : n.owner > 0 && n.type !== 'rivale'
+          ? bossOwned
+            ? 'desc_boss_owned'
+            : 'desc_owned'
+          : (`desc_${n.type}` as TextKey);
     // in Zone 3 steht das Klima mit dabei
     const climate = n.climate ? ` ${t(`climate_${n.climate}` as TextKey)}` : '';
     cardEl.querySelector('.card-desc')!.textContent = t(descKey) + climate;
@@ -238,7 +255,8 @@ function renderCard(): void {
   const q = growthQuote(state, id);
   btn.hidden = !q;
   if (!q) {
-    why.textContent = t('grow_unreachable');
+    // auf dem Planeten: ohne Tiefsee-Hyphen geht es nicht übers Meer
+    why.textContent = t(n.zone === 4 && state.zone >= 4 && state.levels.tiefsee === 0 ? 'grow_need_tiefsee' : 'grow_unreachable');
     return;
   }
   const btnKey: TextKey = n.type === 'rivale' ? 'attack_btn' : n.owner > 0 ? 'reclaim_btn' : 'grow_btn';
@@ -256,7 +274,7 @@ function renderCard(): void {
     why.textContent = t('grow_cost', { missing: fmt(q.cost - state.res.n) });
   } else {
     btn.disabled = false;
-    why.textContent = '';
+    why.textContent = q.ocean ? t('grow_ocean') : '';
   }
 }
 
@@ -299,10 +317,19 @@ function updateUi(force = false): void {
   wEl.classList.toggle('neg', water < 0);
   const c = connectedCount(state);
   // Balken: Fortschritt innerhalb der aktuellen Zone (von ihrer Öffnung bis zu ihrem Ziel)
-  const [from, goal] = state.zone >= 3 ? [CONFIG.zone3.unlockAt, CONFIG.zone3.goal] : state.zone >= 2 ? [CONFIG.zone2.unlockAt, CONFIG.zone2.goal] : [0, CONFIG.zoneGoal];
+  const [from, goal] =
+    state.zone >= 4
+      ? [CONFIG.zone4.unlockAt, CONFIG.zone4.goal]
+      : state.zone >= 3
+        ? [CONFIG.zone3.unlockAt, CONFIG.zone3.goal]
+        : state.zone >= 2
+          ? [CONFIG.zone2.unlockAt, CONFIG.zone2.goal]
+          : [0, CONFIG.zoneGoal];
   $('#net-bar i').style.width = `${Math.max(0, Math.min(100, ((c - from) / (goal - from)) * 100))}%`;
   $('#net').textContent =
-    state.zone >= 3
+    state.zone >= 4
+      ? t('net_progress_z4', { c, goal: CONFIG.zone4.goal })
+      : state.zone >= 3
       ? t('net_progress_z3', { c, goal: CONFIG.zone3.goal })
       : state.zone >= 2
         ? t('net_progress_z2', { c, goal: CONFIG.zone2.goal })
@@ -372,12 +399,68 @@ function updateUi(force = false): void {
     audio.play('fanfare');
     showMessage(t('zone2_done_title'), t('zone2_done_body', { c: connectedCount(state) }));
   }
-  if (state.stats.zone3DoneAt !== null && !zone3DoneShown) {
+  // Zone 4 öffnet genau dann, wenn Zone 3 geschafft ist – dann nur die Zone-4-Meldung
+  if (state.zone >= 4 && !zone4Shown) {
+    zone4Shown = true;
+    zone3DoneShown = true;
+    renderer.startCelebration();
+    audio.play('fanfare');
+    showMessage(t('zone4_title'), t('zone4_body', { goal: CONFIG.zone4.goal }));
+  } else if (state.stats.zone3DoneAt !== null && !zone3DoneShown) {
     zone3DoneShown = true;
     renderer.startCelebration();
     audio.play('fanfare');
     showMessage(t('zone3_done_title'), t('zone3_done_body', { c: connectedCount(state) }));
   }
+  const b = boss(state);
+  if (b && !b.alive && !bossShown && state.stats.zone4DoneAt === null) {
+    bossShown = true;
+    renderer.startCelebration();
+    audio.play('fanfare');
+    showMessage(t('boss_title'), t('boss_body', { goal: CONFIG.zone4.goal }));
+  }
+  if (state.meta.lifetime.planets > state.meta.finaleSeen && !finaleShown) {
+    finaleShown = true;
+    bossShown = true;
+    state.meta.finaleSeen = state.meta.lifetime.planets;
+    showFinale();
+  }
+}
+let zone4Shown = false;
+let bossShown = false;
+let finaleShown = false;
+
+/** Abspann: Kamera fährt heraus, Zeilen erscheinen nacheinander. */
+function showFinale(): void {
+  renderer.startCelebration();
+  renderer.showWholePlanet();
+  audio.play('fanfare');
+  haptic(60);
+  const done = state.stats.zone4DoneAt ?? state.stats.playSeconds;
+  openModal((box) => {
+    box.classList.add('finale');
+    modalEl.classList.add('finale');
+    box.append(el('h2', t('finale_title')));
+    t('finale_lines')
+      .split('|')
+      .forEach((line, i) => {
+        const p = el('p', line, 'finale-line');
+        p.style.animationDelay = `${0.6 + i * 1.4}s`;
+        box.append(p);
+      });
+    const st = el(
+      'p',
+      t('finale_stats', { c: connectedCount(state), runs: fmt(state.meta.runs), spores: fmt(state.meta.sporesTotal), t: formatDuration(done) }),
+      'finale-line small',
+    );
+    st.style.animationDelay = '5s';
+    const after = el('p', t('finale_after'), 'finale-line small');
+    after.style.animationDelay = '5.6s';
+    const ok = el('button', t('finale_continue'), 'primary finale-line');
+    ok.style.animationDelay = '6s';
+    ok.addEventListener('click', closeModal);
+    box.append(st, after, ok);
+  });
 }
 let zoneShown = false;
 let zone2Shown = false;
@@ -390,7 +473,12 @@ function syncShown(): void {
   zone2Shown = state.zone >= 2;
   zone2DoneShown = state.stats.zone2DoneAt !== null || state.zone >= 3;
   zone3Shown = state.zone >= 3;
-  zone3DoneShown = state.stats.zone3DoneAt !== null;
+  zone3DoneShown = state.stats.zone3DoneAt !== null || state.zone >= 4;
+  // wer per Update (alter Spielstand mit 100 Knoten) direkt auf dem Planeten landet, bekommt die Meldung trotzdem
+  zone4Shown = state.zone >= 4 && state.meta.achievements.includes('zone4');
+  bossShown = !boss(state)?.alive && state.zone >= 4;
+  // auch wenn der Planet offline fertig wurde: Abspann zeigen, solange er nicht gesehen wurde
+  finaleShown = state.meta.finaleSeen >= state.meta.lifetime.planets;
 }
 
 // ---------- Tabs: Wachstum · Genom · Erfolge ----------
@@ -487,8 +575,12 @@ function buildGenome(): void {
   need.id = 'prestige-need';
   pr.append(btn, need);
   box.append(pr, el('p', t('spores_have', { v: fmt(state.meta.spores), b: sporeBonusPct() }), 'spores-line'));
-  for (const branch of ['zersetzer', 'symbiont', 'pionier', 'wanderer'] as Branch[]) {
+  for (const branch of ['zersetzer', 'symbiont', 'pionier', 'wanderer', 'weltenpilz'] as Branch[]) {
     box.append(el('h3', t(`branch_${branch}` as TextKey), 'branch'));
+    if (branch === 'weltenpilz' && state.meta.lifetime.maxZone < 4) {
+      box.append(el('p', t('branch_locked'), 'small'));
+      continue;
+    }
     for (const g of CONFIG.genome.filter((x) => x.branch === branch)) {
       const row = el('div', '', 'up');
       const text = el('div', '', 'up-text');
@@ -743,6 +835,8 @@ canvas.addEventListener('keydown', (e) => {
 
 function openModal(build: (box: HTMLElement) => void): void {
   modalBox.innerHTML = '';
+  modalBox.classList.remove('finale');
+  modalEl.classList.remove('finale');
   build(modalBox);
   modalEl.hidden = false;
 }
@@ -774,7 +868,7 @@ function showSettings(): void {
     box.append(el('h2', t('settings')));
     box.append(el('h3', t('help')), el('p', t('help_body')));
     const legend = el('div', '', 'legend');
-    for (const type of ['laub', 'totholz', 'feucht', 'baum', 'stein', 'altbaum', 'rivale', 'moor', 'mineral', 'hexenring'] as const) {
+    for (const type of ['laub', 'totholz', 'feucht', 'baum', 'stein', 'altbaum', 'rivale', 'moor', 'mineral', 'hexenring', 'vulkan', 'urwald', 'koralle'] as const) {
       const item = el('span', '', 'legend-item');
       const dot = el('i', '', type === 'stein' ? 'hex' : '');
       dot.style.background = NODE_COLORS[type];
@@ -1058,13 +1152,15 @@ panelOpen = prefs.panelOpen;
 setTab('grow');
 checkDay();
 setInterval(checkDay, 60_000);
+// erst merken, was schon gezeigt wurde – dann Erfolge prüfen (sonst fehlt nach dem Update die Planet-Meldung)
+syncShown();
 checkAchievements(state);
 renderer.reducedMotion = prefs.reducedMotion;
 renderer.resize();
-syncShown();
 updateUi(true);
 if (booted.restored) toast(t('restored'));
-if (booted.welcome) {
+// „Willkommen zurück“ nur, wenn nicht gerade eine wichtigere Meldung (neue Zone) offen ist
+if (booted.welcome && modalEl.hidden) {
   showMessage(t('welcome_title'), t('welcome_body', { t: formatDuration(booted.welcome.seconds), v: fmt(booted.welcome.gained) }));
 }
 save();

@@ -1,6 +1,6 @@
 import { type GenomeId, type UpgradeId } from './config';
 import { generateMap } from './map';
-import { connectedCount, mods, newGame, newMeta, simulate, type Edge, type EventsState, type GameState, type Growth, type Meta, type Rival } from './game';
+import { boss, connectedCount, mods, newGame, newMeta, simulate, type Edge, type EventsState, type GameState, type Growth, type Meta, type Rival } from './game';
 import { CONFIG, type Zone } from './config';
 import type { Daily } from './daily';
 import { readTrack } from './tracking';
@@ -12,10 +12,10 @@ import { readTrack } from './tracking';
  *  3. einen Test mit einem echten alten Spielstand hinzufügen
  * So gehen alte Spielstände bei Updates nie verloren.
  */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
-export interface SaveV6 {
-  v: 6;
+export interface SaveV7 {
+  v: 7;
   savedAt: number; // ms seit Epoche
   seed: number;
   connected: number[];
@@ -58,18 +58,20 @@ const MIGRATIONS: Record<number, (old: AnySave) => AnySave> = {
   4: (s) => ({ ...s, v: 5 }),
   // v5 → v6: Spielstatistik (Standardwerte beim Lesen)
   5: (s) => ({ ...s, v: 6 }),
+  // v6 → v7: Zone 4 „Planet“ (neue Upgrades, Endgegner, Finale) – Standardwerte beim Lesen
+  6: (s) => ({ ...s, v: 7 }),
 };
 
 const num = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 
-export function serialize(s: GameState, now: number): SaveV6 {
+export function serialize(s: GameState, now: number): SaveV7 {
   const fresh = generateMap(s.seed);
   const stocks: Record<string, number> = {};
   for (const n of s.nodes) {
     if (n.type === 'totholz' && n.stock !== fresh[n.id]?.stock) stocks[n.id] = n.stock;
   }
   return {
-    v: 6,
+    v: 7,
     savedAt: now,
     seed: s.seed,
     connected: s.nodes.filter((n) => n.connected && n.type !== 'spore').map((n) => n.id),
@@ -88,7 +90,7 @@ export function serialize(s: GameState, now: number): SaveV6 {
   };
 }
 
-function migrate(raw: AnySave): SaveV6 {
+function migrate(raw: AnySave): SaveV7 {
   let cur = raw;
   while (cur.v < SAVE_VERSION) {
     const step = MIGRATIONS[cur.v];
@@ -96,7 +98,7 @@ function migrate(raw: AnySave): SaveV6 {
     cur = step(cur);
   }
   if (cur.v !== SAVE_VERSION) throw new Error(`Spielstand-Version ${cur.v} ist neuer als dieses Spiel`);
-  return cur as unknown as SaveV6;
+  return cur as unknown as SaveV7;
 }
 
 const GENOME_IDS = new Set<GenomeId>(CONFIG.genome.map((g) => g.id));
@@ -119,6 +121,7 @@ function readMeta(m: Partial<Meta> | undefined): Meta {
   return {
     daily,
     track: readTrack(m.track),
+    finaleSeen: num(m.finaleSeen),
     spores: num(m.spores),
     sporesTotal: num(m.sporesTotal),
     runs: num(m.runs),
@@ -139,6 +142,9 @@ function readMeta(m: Partial<Meta> | undefined): Meta {
       rivalsBeaten: num(lt.rivalsBeaten),
       minerals: num(lt.minerals),
       windSeen: num(lt.windSeen),
+      bossBeaten: num(lt.bossBeaten),
+      planets: num(lt.planets),
+      maxZone: Math.max(1, Math.min(4, num(lt.maxZone, 1))),
     },
   };
 }
@@ -168,7 +174,7 @@ export function deserialize(raw: unknown): GameState {
       edges: (saved.edges ?? []).map(([from, to]) => ({ from, to })),
       nextAt: num(saved.nextAt),
       alive: saved.alive !== false,
-      reach: num(saved.reach, CONFIG.rivals.reach),
+      reach: num(saved.reach, r.reach),
     };
   });
   for (const [id, owner] of Object.entries(d.owners ?? {})) {
@@ -179,7 +185,7 @@ export function deserialize(raw: unknown): GameState {
     const core = nodes[r.core];
     if (core) core.owner = r.alive ? i + 1 : 0;
   });
-  const zone: Zone = d.zone === 3 ? 3 : d.zone === 2 ? 2 : 1;
+  const zone: Zone = d.zone === 4 ? 4 : d.zone === 3 ? 3 : d.zone === 2 ? 2 : 1;
   const state: GameState = {
     seed: num(d.seed),
     nodes,
@@ -192,6 +198,8 @@ export function deserialize(raw: unknown): GameState {
       rhizo: num(lv.rhizo),
       kristall: num(lv.kristall),
       fern: num(lv.fern),
+      tiefsee: num(lv.tiefsee),
+      planet: num(lv.planet),
     },
     growth: d.growth ?? null,
     stats: {
@@ -201,6 +209,7 @@ export function deserialize(raw: unknown): GameState {
       zoneDoneAt: d.stats?.zoneDoneAt ?? null,
       zone2DoneAt: d.stats?.zone2DoneAt ?? null,
       zone3DoneAt: d.stats?.zone3DoneAt ?? null,
+      zone4DoneAt: d.stats?.zone4DoneAt ?? null,
     },
     meta: readMeta(d.meta),
     events: { active: ev.active ?? null, golden: ev.golden ?? null, nextAt: num(ev.nextAt, 150), counter: num(ev.counter) },
@@ -215,6 +224,16 @@ export function deserialize(raw: unknown): GameState {
     state.zone2Since = state.stats.playSeconds;
   }
   if (state.zone === 2 && c >= CONFIG.zone3.unlockAt) state.zone = 3;
+  if (state.zone === 3 && c >= CONFIG.zone4.unlockAt) {
+    // wer schon 100 Knoten hatte (vor dem Update), landet direkt auf dem Planeten
+    state.zone = 4;
+    state.meta.track.run.zone4At = state.stats.playSeconds;
+    const b = boss(state);
+    if (b) b.nextAt = state.stats.playSeconds + CONFIG.zone4.boss.interval * 2;
+  }
+  state.meta.lifetime.maxZone = Math.max(state.meta.lifetime.maxZone, state.zone);
+  // Tiefsee-Faden: nur „ocean“ übernehmen, wenn es wirklich gesetzt war
+  if (state.growth) state.growth = { from: num(state.growth.from), to: num(state.growth.to), length: num(state.growth.length), progress: num(state.growth.progress), ...(state.growth.ocean === true ? { ocean: true } : {}) };
   return state;
 }
 

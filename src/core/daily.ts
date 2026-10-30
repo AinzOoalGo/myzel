@@ -35,7 +35,7 @@ interface QuestTemplate {
 }
 
 const TEMPLATES: QuestTemplate[] = [
-  { kind: 'connect', minZone: 1, target: (z) => [8, 12, 15][z - 1] ?? 15 },
+  { kind: 'connect', minZone: 1, target: (z) => [8, 12, 15, 12][z - 1] ?? 15 },
   { kind: 'connect_type', nodeType: 'totholz', minZone: 1, target: () => 3 },
   { kind: 'connect_type', nodeType: 'baum', minZone: 1, target: () => 2 },
   { kind: 'connect_type', nodeType: 'feucht', minZone: 1, target: () => 2 },
@@ -48,6 +48,9 @@ const TEMPLATES: QuestTemplate[] = [
   { kind: 'genome', minZone: 2, target: () => 1 },
   { kind: 'connect_type', nodeType: 'moor', minZone: 3, target: () => 1 },
   { kind: 'connect_type', nodeType: 'mineral', minZone: 3, target: () => 2 },
+  { kind: 'connect_type', nodeType: 'koralle', minZone: 4, target: () => 2 },
+  { kind: 'connect_type', nodeType: 'vulkan', minZone: 4, target: () => 1 },
+  { kind: 'connect_type', nodeType: 'urwald', minZone: 4, target: () => 1 },
 ];
 
 /** Datum als YYYY-MM-DD in Ortszeit */

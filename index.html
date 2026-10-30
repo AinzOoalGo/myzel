@@ -152,6 +152,13 @@
       .box h2 { margin: 0 0 8px; font-size: 20px; }
       .box h3 { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--quiet); }
       .box p { margin: 0 0 10px; }
+      /* Abspann: durchsichtiger Hintergrund (man sieht den Planeten), Zeilen erscheinen nacheinander */
+      #modal.finale { background: radial-gradient(ellipse at center, rgba(0,0,0,.15), rgba(0,0,0,.65)); }
+      .box.finale { background: rgba(28,22,16,.82); text-align: center; border-color: #6b5a3a; }
+      .box.finale h2 { color: #ffd68c; font-size: 22px; animation: finaleIn 1.2s ease both; }
+      .finale-line { opacity: 0; animation: finaleIn 1.4s ease both; }
+      @keyframes finaleIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) { .finale-line, .box.finale h2 { animation: none; opacity: 1; } }
       .box button { width: 100%; margin-top: 8px; }
       .box button.danger { background: #4a2a22; color: #ffcfbf; }
       .box textarea { width: 100%; height: 64px; background: var(--bg); color: var(--ink); border: 1px solid var(--line);

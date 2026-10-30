@@ -24,6 +24,8 @@ export interface RunRecord {
   zone2DoneAt: number | null;
   zone3At: number | null;
   zone3DoneAt: number | null;
+  zone4At: number | null;
+  zone4DoneAt: number | null;
 }
 
 export interface RunTrack {
@@ -32,6 +34,7 @@ export interface RunTrack {
   testReal: number;
   offline: number;
   zone3At: number | null;
+  zone4At: number | null;
 }
 
 export interface Track {
@@ -49,7 +52,7 @@ export const MAX_HISTORY = 100;
 export const MAX_SESSIONS = 50;
 
 export function newRunTrack(now: number): RunTrack {
-  return { startedAt: now, realActive: 0, testReal: 0, offline: 0, zone3At: null };
+  return { startedAt: now, realActive: 0, testReal: 0, offline: 0, zone3At: null, zone4At: null };
 }
 
 export function newTrack(now = 0): Track {
@@ -97,6 +100,7 @@ export function readTrack(raw: unknown): Track {
       testReal: num(run.testReal),
       offline: num(run.offline),
       zone3At: numOrNull(run.zone3At),
+      zone4At: numOrNull(run.zone4At),
     },
     history: Array.isArray(r.history)
       ? r.history.slice(-MAX_HISTORY).map((h) => ({
@@ -115,6 +119,8 @@ export function readTrack(raw: unknown): Track {
           zone2DoneAt: numOrNull(h.zone2DoneAt),
           zone3At: numOrNull(h.zone3At),
           zone3DoneAt: numOrNull(h.zone3DoneAt),
+          zone4At: numOrNull(h.zone4At),
+          zone4DoneAt: numOrNull(h.zone4DoneAt),
         }))
       : [],
   };

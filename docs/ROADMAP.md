@@ -4,9 +4,12 @@ Reihenfolge wird **vom Chef** festgelegt. Nichts davon ohne sein Startsignal beg
 
 ## Als Nächstes
 
-1. **Zone 4 „Planet“** (vom Chef bestätigt als nächster großer Schritt, wartet auf „Los“)
-   - Idee aus dem Konzept: Netz umspannt die Erde, Endspiel. Vorschlag: Ozeane als Hindernis, nur mit teuren Unterwasser-Fäden überquerbar; großes Finale.
-   - Technisch: als weiterer Ring an die Karte **anhängen** (eigener RNG, Fingerabdruck-Test für Zone 1–3), `Zone`-Typ erweitern, Spielstand-Migration, Simulation bis Zone-4-Ziel erweitern, Darstellung bei noch stärkerem Herauszoomen prüfen.
+Noch nichts festgelegt – der Chef entscheidet. Zone 4 „Planet“ ist seit 1.3 fertig (Abspann sagt „Mehr kommt in einem Update“).
+
+Mögliche nächste Inhalte (Vorschläge, nichts davon beschlossen):
+- **Zone 5** (z. B. Mond/Weltraum) – wieder angehängt mit eigenem Zufall.
+- **Neues Spiel+ nach dem Abspann** (Planet erneut mit Bonus).
+- Punkte aus „Notiert“ unten.
 
 ## Notiert (wartet auf Entscheidung des Chefs)
 

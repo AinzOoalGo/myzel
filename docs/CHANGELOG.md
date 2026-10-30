@@ -32,3 +32,4 @@
 | 1.2.1 | 29.10.2026 | Statistik (echte/Test-/Offline-Zeit, Sitzungen, Durchläufe), Gerätename, Export als Text, Spielstand v6; vollständige Dokumentation |
 | 1.2.2 | 30.10.2026 | Kopfzeile neu: zwei Reihen (Rohstoffe + Zahnrad, darunter Zonen-Fortschritt mit Balken), große Zahlen kurz („542 Mrd.“), Sporen zeigen Bonus in %; nichts wird mehr abgeschnitten |
 | 1.2.3 | 30.10.2026 | Sporen-Dämpfung: über 150 Sporen pro Flug wächst der Ertrag langsamer (gegen den „Sporen-Schneeball“); Simulation mit Offline-Spieler |
+| 1.3 | 30.10.2026 | **Zone 4 „Planet“**: Meer mit 5 Kontinenten, Tiefsee-Fäden (Upgrade Tiefsee-Hyphen), Vulkane, Urwald-Riesen, Korallenriffe, Riesen-Schleimpilz als Endgegner, Abspann bei 150 Knoten + Sieg; Upgrade Planetennetz, Genom-Ast „Weltenpilz“, 7 neue Erfolge, neue Tagesaufgaben, Statistik mit Zone 4; Spielstand v7; Simulation bis zum Planeten |

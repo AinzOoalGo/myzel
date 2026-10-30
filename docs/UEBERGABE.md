@@ -30,11 +30,11 @@ Stand: 29.10.2026 · Version 1.2.1 · Repository: https://github.com/AinzOoalGo/
 
 - **Kern:** Tippen → Nährstoffe; Knoten antippen → Faden wachsen lassen (kostet Nährstoffe, braucht Zeit); verbundene Knoten produzieren automatisch, auch offline (12 Std., mit Mutation mehr).
 - **Ressourcen:** Nährstoffe, Zucker (Bäume), Wasser (Feuchtstellen/Moore), Mineralien (Zone 3), Sporen (Prestige).
-- **Zonen:** 1 Waldboden (Ziel 25 Knoten) → 2 Wald (ab 25, Ziel 60, Konkurrenzpilze, Jahreszeiten) → 3 Kontinent (ab 60, Ziel 100, Klimazonen, Moor, Mineraladern, Hexenringe, Sporenwind).
-- **Prestige „Sporenflug“** ab 15 Knoten → Sporen → **Genom** mit 4 Ästen × 4 Mutationen, jede bis **Stufe 5**.
+- **Zonen:** 1 Waldboden (Ziel 25 Knoten) → 2 Wald (ab 25, Ziel 60, Konkurrenzpilze, Jahreszeiten) → 3 Kontinent (ab 60, Ziel 100, Klimazonen, Moor, Mineraladern, Hexenringe, Sporenwind) → 4 Planet (ab 100, Ziel 150 + Riesen-Schleimpilz besiegt; Meer mit Tiefsee-Fäden, Vulkane, Urwald-Riesen, Korallenriffe, Abspann).
+- **Prestige „Sporenflug“** ab 15 Knoten → Sporen (über 150 pro Flug gedämpft) → **Genom** mit 5 Ästen × 4 Mutationen (5. Ast „Weltenpilz“ ab Zone 4), jede bis **Stufe 5**.
 - **Ereignisse:** Regen, Dürre, goldener Fruchtkörper, Sporenwind (Zone 3).
 - **Konkurrenzpilze** (violett) nehmen nur *freie* Knoten, greifen den Spieler **nicht** an. Spieler kann zurückerobern, Leitungen kappen, Kerne angreifen.
-- **Erfolge** (35, je +2 % Nährstoffe), **Tagesaufgaben** (3 pro Tag, Sporen, Serienbonus), **Statistik**.
+- **Erfolge** (42, je +2 % Nährstoffe), **Tagesaufgaben** (3 pro Tag, Sporen, Serienbonus), **Statistik**.
 - **Oberfläche:** Kopfzeile mit Ressourcen und Raten; Spielfeld mit Zoom (zwei Finger/Mausrad), Verschieben, Knöpfe „⌂ Ursprung“ und „⌖ Zentrieren“; unten aufklappbare Leiste (Wachstum · Genom · Erfolge). Knoten-Karte: Name + Kosten-Knopf, darunter Ertrag und Beschreibung.
 - **Ton:** Selbst erzeugte Effekte + Waldgeräusche (keine Musik – der Chef mochte die Musik nicht).
 - **Web-App:** installierbar, offline spielbar, Sicherungskopie des Spielstands, Export/Import als Text.
@@ -53,13 +53,14 @@ Stand: 29.10.2026 · Version 1.2.1 · Repository: https://github.com/AinzOoalGo/
 | Musik | Keine Musik, stattdessen Naturgeräusche |
 | Layout | „Schlanke Liste“ (Variante B), Leiste unten **zuklappbar**, Knoten-Karte mit Infos |
 | Gegner | Greifen **nicht** an. Chef findet sie aktuell **evtl. zu schnell** – **noch nicht ändern**, erst Daten aus normalem Spielen (×1) abwarten |
-| Reihenfolge | Tagesaufgaben + Genom-Stufen (erledigt) → **als Nächstes Zone 4 „Planet“** |
+| Reihenfolge | Tagesaufgaben + Genom-Stufen (erledigt) → Zone 4 „Planet“ (erledigt, 1.3) → **Nächstes legt der Chef fest** |
+| Zone 4 (30.10.) | Ozeane nur mit **teuren Tiefsee-Fäden**; **Riesen-Schleimpilz** als Endgegner (greift nicht an); bei 150 Knoten + Sieg **Abspann, danach weiterspielen** |
 | Battle-Modus | Idee des Chefs (PvP, 4 Spieler, Letzter gewinnt). **Erst wenn der Chef es sagt.** Empfohlen: zuerst Arena gegen 3 Computer-Pilze (ohne Server), dann online |
 | Sporen-Schneeball | Chef überließ die Entscheidung dem Projektleiter (30.10.): Dämpfung ab 150 Sporen pro Flug eingebaut (1.2.3), Sporenbonus +2 % unverändert. Weiter beobachten mit Statistik vom „Normal“-Handy |
 
 ## 6. Was als Nächstes kommt
 
-Siehe [ROADMAP.md](ROADMAP.md). Kurz: **Zone 4 „Planet“** wartet auf das Startsignal des Chefs. Vorher evtl. Statistik-Daten vom Chef auswerten.
+Siehe [ROADMAP.md](ROADMAP.md). Kurz: Zone 4 ist fertig (1.3). Was als Nächstes kommt, entscheidet der Chef. Statistik vom „Normal“-Handy weiter auswerten.
 
 ## 7. Technik in einem Satz
 

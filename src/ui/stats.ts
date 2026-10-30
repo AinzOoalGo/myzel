@@ -23,6 +23,7 @@ export function statsSummary(s: GameState): [string, string][] {
     [t('st_best'), String(best)],
     [t('st_spores'), formatNumber(s.meta.sporesTotal)],
     [t('st_taps'), formatNumber(s.meta.lifetime.taps)],
+    [t('st_planets'), formatNumber(s.meta.lifetime.planets)],
   ];
 }
 
@@ -36,12 +37,12 @@ export function statsText(s: GameState, device: string, version: string): string
     `MYZEL-STATISTIK · Gerät: ${device || 'ohne Namen'} · ${version} · ${d(Date.now())} UTC`,
     `Echt: ${Math.round(tr.realActive / 60)} Min (Tempo-Regler: ${Math.round(tr.testReal / 60)} Min) · Offline: ${Math.round(tr.offline / 60)} Min`,
     `Sitzungen: ${tr.sessions + 1} · Median-Sitzung: ${Math.round(median(tr.sessionLens) / 60)} Min · letzte: ${tr.sessionLens.length ? `${tr.sessionLens.slice(-10).map((x) => Math.round(x / 60)).join(',')} Min` : '–'}`,
-    `Sporenflüge: ${s.meta.runs} · Sporen gesamt: ${Math.round(s.meta.sporesTotal)} · Mutationen: ${s.meta.genome.length} · Erfolge: ${s.meta.achievements.length} · Tipps: ${s.meta.lifetime.taps} · Serie: ${s.meta.daily.streak}`,
+    `Sporenflüge: ${s.meta.runs} · Sporen gesamt: ${Math.round(s.meta.sporesTotal)} · Mutationen: ${s.meta.genome.length} · Erfolge: ${s.meta.achievements.length} · Tipps: ${s.meta.lifetime.taps} · Serie: ${s.meta.daily.streak} · Planeten: ${s.meta.lifetime.planets} · Schleimpilz besiegt: ${s.meta.lifetime.bossBeaten}`,
     `Aktuell: Durchlauf ${s.meta.runs + 1}, ${connectedCount(s)} Knoten, Zone ${s.zone}, Spielzeit ${Math.round(s.stats.playSeconds / 60)} Min, echt ${Math.round(tr.run.realActive / 60)} Min, Test ${Math.round(tr.run.testReal / 60)} Min`,
-    'Nr | Start | Spiel-Min | Echt-Min | Test-Min | Offline-Min | Knoten | Zone | Sporen | Z1 fertig | Z2 ab | Z2 fertig | Z3 ab | Z3 fertig (Spiel-Min)',
+    'Nr | Start | Spiel-Min | Echt-Min | Test-Min | Offline-Min | Knoten | Zone | Sporen | Z1 fertig | Z2 ab | Z2 fertig | Z3 ab | Z4 ab | Z4 fertig (Spiel-Min)',
     ...tr.history.map(
       (h) =>
-        `${h.n} | ${d(h.startedAt)} | ${m(h.playSec)} | ${m(h.realSec)} | ${m(h.testSec)} | ${m(h.offlineSec)} | ${h.nodes} | ${h.zone} | ${h.spores} | ${m(h.zone1DoneAt)} | ${m(h.zone2At)} | ${m(h.zone2DoneAt)} | ${m(h.zone3At)} | ${m(h.zone3DoneAt)}`,
+        `${h.n} | ${d(h.startedAt)} | ${m(h.playSec)} | ${m(h.realSec)} | ${m(h.testSec)} | ${m(h.offlineSec)} | ${h.nodes} | ${h.zone} | ${h.spores} | ${m(h.zone1DoneAt)} | ${m(h.zone2At)} | ${m(h.zone2DoneAt)} | ${m(h.zone3At)} | ${m(h.zone4At)} | ${m(h.zone4DoneAt)}`,
     ),
   ];
   return lines.join('\n');

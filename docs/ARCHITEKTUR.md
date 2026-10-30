@@ -49,13 +49,15 @@ tests/             bun test – Kern, Zonen, Phase 4, Tagesaufgaben, Statistik, 
 
 ## Karte
 
-`generateMap(seed)`: Zone 1 (230 Knoten, Startgruppe garantiert) → `appendZone2` (eigener RNG `seed ^ 0x5a2e2`) → `appendZone3` (eigener RNG `seed ^ 0x3c0717`, Klima-Drehung `seed ^ 0xc11a7e`). **Bestehende Zonen dürfen sich nie ändern**, weil Spielstände nur Knoten-IDs speichern. Tests (`tests/zone2.test.ts`, `tests/zone3.test.ts`) prüfen Fingerabdrücke der alten Karten. Zone 4 muss genauso angehängt werden.
+`generateMap(seed)`: Zone 1 (230 Knoten, Startgruppe garantiert) → `appendZone2` (eigener RNG `seed ^ 0x5a2e2`) → `appendZone3` (eigener RNG `seed ^ 0x3c0717`, Klima-Drehung `seed ^ 0xc11a7e`) → `appendZone4` (Knoten-RNG `seed ^ 0x4a7e70`, Kontinente über `planetGeography(seed)` mit RNG `seed ^ 0x6e0a11`). **Bestehende Zonen dürfen sich nie ändern**, weil Spielstände nur Knoten-IDs speichern. Tests (`tests/zone2.test.ts`, `tests/zone3.test.ts`, `tests/zone4.test.ts`) prüfen Fingerabdrücke der alten Karten. Eine Zone 5 muss genauso angehängt werden.
+
+**Meer (Zone 4):** Land = Heimatkreis (Radius `zone4.coast`) + 5 wellige Kontinente (`Continent`, Randradius mit 3er-/5er-Welle). `isOcean`, `segmentCrossesOcean` (abgetastet alle 120 Einheiten). `findSourceInfo` bevorzugt Landwege; Seewege nur mit Upgrade `tiefsee`. Der Faden merkt sich `growth.ocean` (langsamer). Der Schleimpilz ist ein normaler Rivale mit Kern in Zone 4 (`boss(s)`), darf aber keine Seewege nehmen.
 
 ## Spielstände
 
 - Gespeichert in `localStorage['myzel.save']`, vorheriger Stand in `myzel.save.bak` (wird automatisch geladen, wenn der Hauptstand kaputt ist). Einstellungen in `myzel.prefs`.
 - Format: kompakt – Seed + verbundene IDs + Kanten + geänderte Totholz-Vorräte + Ressourcen + Stufen + Meta. Karte wird beim Laden aus dem Seed neu erzeugt.
-- **`SAVE_VERSION` aktuell 6.** Migrationen 1→2→…→6 in `save.ts`. Ein echter v1-Spielstand liegt in `tests/fixtures/save-v1.json` und wird in mehreren Tests geladen.
+- **`SAVE_VERSION` aktuell 7** (1.3: Zone 4, neue Upgrades, `meta.finaleSeen`, `lifetime.bossBeaten/planets/maxZone`, `stats.zone4DoneAt`). Migrationen 1→2→…→7 in `save.ts`. Alte Spielstände mit ≥ 100 Knoten landen beim Laden direkt in Zone 4. Ein echter v1-Spielstand liegt in `tests/fixtures/save-v1.json` und wird in mehreren Tests geladen.
 - **Regel:** Formatänderung ⇒ Version +1, Migration, Test. Neue Felder beim Lesen immer mit sicherem Standardwert (`num()`, `readMeta`, `readTrack`).
 - Text-Export = Base64(JSON).
 

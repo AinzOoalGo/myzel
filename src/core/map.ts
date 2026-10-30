@@ -12,7 +12,7 @@ export interface MapNode {
   /** Nur Totholz: verbleibender Vorrat. */
   stock: number;
   connected: boolean;
-  /** 1 = Waldboden, 2 = Wald, 3 = Kontinent */
+  /** 1 = Waldboden, 2 = Wald, 3 = Kontinent, 4 = Planet */
   zone: Zone;
   /** nur Zone 3: Klimazone */
   climate: Climate | null;
@@ -37,6 +37,7 @@ export function totholzStock(dist: number): number {
 function sizeScale(zone: Zone, type: NodeType): number {
   if (zone === 2) return type !== 'altbaum' && type !== 'rivale' ? CONFIG.zone2.sizeScale : 1;
   if (zone === 3) return type === 'altbaum' || type === 'rivale' ? CONFIG.zone3.sizeScale * 0.55 : CONFIG.zone3.sizeScale;
+  if (zone === 4) return type === 'rivale' ? CONFIG.zone4.sizeScale * 0.9 : type === 'altbaum' || type === 'urwald' ? CONFIG.zone4.sizeScale * 0.6 : CONFIG.zone4.sizeScale;
   return 1;
 }
 
@@ -92,6 +93,7 @@ export function generateMap(seed: number): MapNode[] {
   }
   appendZone2(nodes, seed);
   appendZone3(nodes, seed);
+  appendZone4(nodes, seed);
   return nodes;
 }
 
@@ -177,6 +179,141 @@ function appendZone2(nodes: MapNode[], seed: number): void {
       }
     }
     nodes.push(makeNode(nodes.length, x, y, type, 2));
+  }
+}
+
+// ---------- Zone 4 „Planet“ ----------
+
+/** Eine Landmasse: Mittelpunkt und welliger Rand (Radius schwankt mit dem Winkel). */
+export interface Continent {
+  x: number;
+  y: number;
+  r: number;
+  /** Wellen des Randes: Stärke und Phase für 3er- und 5er-Welle */
+  w3: number;
+  p3: number;
+  w5: number;
+  p5: number;
+}
+
+const geoCache = new Map<number, Continent[]>();
+
+/** Lage der Kontinente – eigener Zufall, unabhängig von den Knoten. */
+export function planetGeography(seed: number): Continent[] {
+  const hit = geoCache.get(seed);
+  if (hit) return hit;
+  const z = CONFIG.zone4;
+  const rng = createRng((seed ^ 0x6e0a11) >>> 0);
+  const rot = rng() * Math.PI * 2;
+  const list: Continent[] = [];
+  for (let i = 0; i < z.continents; i++) {
+    const a = rot + (i / z.continents) * Math.PI * 2 + (rng() - 0.5) * 0.35;
+    let d = z.continentDist[0] + rng() * (z.continentDist[1] - z.continentDist[0]);
+    const r = z.continentRadius[0] + rng() * (z.continentRadius[1] - z.continentRadius[0]);
+    const w3 = 0.08 + rng() * 0.1;
+    const p3 = rng() * Math.PI * 2;
+    const w5 = 0.04 + rng() * 0.07;
+    const p5 = rng() * Math.PI * 2;
+    // immer ein Meeresarm zwischen Heimatkontinent und Landmasse (berühren sich nie)
+    d = Math.max(d, z.coast + z.minStrait + r * (1 + w3 + w5));
+    list.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, r, w3, p3, w5, p5 });
+  }
+  if (geoCache.size > 20) geoCache.clear();
+  geoCache.set(seed, list);
+  return list;
+}
+
+/** Randradius eines Kontinents in Richtung des Winkels a. */
+export function continentRadius(c: Continent, a: number): number {
+  return c.r * (1 + c.w3 * Math.sin(3 * a + c.p3) + c.w5 * Math.sin(5 * a + c.p5));
+}
+
+/** Liegt der Punkt im Meer? Der Heimatkontinent (Zone 1–3) und die Landmassen sind Land. */
+export function isOcean(geo: Continent[], x: number, y: number): boolean {
+  if (Math.hypot(x, y) <= CONFIG.zone4.coast) return false;
+  for (const c of geo) {
+    const dx = x - c.x;
+    const dy = y - c.y;
+    if (Math.hypot(dx, dy) <= continentRadius(c, Math.atan2(dy, dx))) return false;
+  }
+  return true;
+}
+
+/** Führt die Strecke a→b über Wasser? (abgetastet; Strecken auf dem Heimatkontinent nie) */
+export function segmentCrossesOcean(geo: Continent[], ax: number, ay: number, bx: number, by: number): boolean {
+  const coast = CONFIG.zone4.coast;
+  if (Math.hypot(ax, ay) <= coast && Math.hypot(bx, by) <= coast) return false;
+  const len = Math.hypot(bx - ax, by - ay);
+  const steps = Math.max(2, Math.ceil(len / CONFIG.zone4.oceanSample));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    if (isOcean(geo, ax + (bx - ax) * t, ay + (by - ay) * t)) return true;
+  }
+  return false;
+}
+
+/** Zone 4 – Landknoten auf den Kontinenten, Korallenriffe im Meer, ein Riesen-Schleimpilz. */
+function appendZone4(nodes: MapNode[], seed: number): void {
+  const z = CONFIG.zone4;
+  const geo = planetGeography(seed);
+  const rng = createRng((seed ^ 0x4a7e70) >>> 0);
+  const tooClose = (x: number, y: number) =>
+    nodes.some((n) => Math.hypot(n.x - x, n.y - y) < (n.zone === 4 ? z.minSpacing : n.zone === 3 ? CONFIG.zone3.minSpacing : 0));
+  // Endgegner: Kern auf einem zufälligen Kontinent, etwas außerhalb der Mitte
+  const home = geo[Math.floor(rng() * geo.length)]!;
+  nodes.push(makeNode(nodes.length, home.x * 1.06, home.y * 1.06, 'rivale', 4));
+  // Landknoten
+  const total = Object.values(z.weights).reduce((a, b) => a + b, 0);
+  let placed = 0;
+  let attempts = 0;
+  while (placed < z.landNodes && attempts < z.landNodes * 80) {
+    attempts++;
+    const c = geo[Math.floor(rng() * geo.length)]!;
+    const a = rng() * Math.PI * 2;
+    const d = Math.sqrt(rng()) * continentRadius(c, a) * 0.94;
+    const x = c.x + Math.cos(a) * d;
+    const y = c.y + Math.sin(a) * d;
+    if (Math.hypot(x, y) < z.innerRadius || tooClose(x, y)) continue;
+    let roll = rng() * total;
+    let type: NodeType = 'laub';
+    for (const [t, w] of Object.entries(z.weights) as [NodeType, number][]) {
+      roll -= w;
+      if (roll < 0) {
+        type = t;
+        break;
+      }
+    }
+    nodes.push(makeNode(nodes.length, x, y, type, 4));
+    placed++;
+  }
+  // Riff-Ketten: von der Heimatküste zu jedem Kontinent – so ist jede Landmasse sicher erreichbar
+  for (const c of geo) {
+    const a = Math.atan2(c.y, c.x);
+    const from = z.coast + 300;
+    // letztes Riff knapp vor der Küste, damit der Sprung an Land kurz bleibt
+    const to = Math.hypot(c.x, c.y) - continentRadius(c, a + Math.PI) - 150;
+    const steps = Math.max(1, Math.ceil((to - from) / z.reefChainStep));
+    for (let i = 0; i <= steps; i++) {
+      const d = from + ((to - from) * i) / steps;
+      const side = (rng() - 0.5) * 2 * z.reefChainJitter;
+      const x = Math.cos(a) * d - Math.sin(a) * side;
+      const y = Math.sin(a) * d + Math.cos(a) * side;
+      if (!isOcean(geo, x, y) || nodes.some((n) => n.zone === 4 && Math.hypot(n.x - x, n.y - y) < z.minSpacing * 0.6)) continue;
+      nodes.push(makeNode(nodes.length, x, y, 'koralle', 4));
+    }
+  }
+  // weitere Korallenriffe verstreut im Meer
+  placed = 0;
+  attempts = 0;
+  while (placed < z.reefNodes && attempts < z.reefNodes * 200) {
+    attempts++;
+    const d = z.coast + 250 + Math.sqrt(rng()) * (z.outerRadius - z.coast - 250);
+    const a = rng() * Math.PI * 2;
+    const x = Math.cos(a) * d;
+    const y = Math.sin(a) * d;
+    if (!isOcean(geo, x, y) || tooClose(x, y)) continue;
+    nodes.push(makeNode(nodes.length, x, y, 'koralle', 4));
+    placed++;
   }
 }
 

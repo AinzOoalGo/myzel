@@ -247,5 +247,7 @@ describe('Sporen-Dämpfung (1.2.3)', () => {
     expect(dampSpores(600)).toBeCloseTo(300);
     expect(dampSpores(2400)).toBeCloseTo(600);
     expect(dampSpores(151)).toBeGreaterThan(150);
+    // zweite Stufe ab 2.000 (gedämpft)
+    expect(dampSpores(150 * (8000 / 150) ** 2)).toBeCloseTo(4000);
   });
 });

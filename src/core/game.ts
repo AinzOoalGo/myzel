@@ -1,5 +1,5 @@
 import { CONFIG, type Cost, type EventType, type GenomeDef, type GenomeId, type Season, type UpgradeDef, type UpgradeId, type Zone } from './config';
-import { generateMap, pointSegmentDistance, type MapNode } from './map';
+import { generateMap, planetGeography, pointSegmentDistance, segmentCrossesOcean, type MapNode } from './map';
 import { createRng } from './rng';
 import { bump, newDaily, type Daily } from './daily';
 import { newRunTrack, newTrack, type RunRecord, type Track } from './tracking';
@@ -14,6 +14,8 @@ export interface Growth {
   to: number;
   length: number;
   progress: number;
+  /** Tiefsee-Faden (über Wasser): wächst langsamer */
+  ocean?: boolean;
 }
 
 export interface Resources {
@@ -36,6 +38,8 @@ export interface Meta {
   daily: Daily;
   /** Spielstatistik (nur lokal) */
   track: Track;
+  /** wie viele Abspänne (Planet umspannt) der Spieler schon gesehen hat – auch wenn es offline passierte */
+  finaleSeen: number;
   achievements: string[];
   lifetime: {
     totalN: number;
@@ -47,6 +51,12 @@ export interface Meta {
     rivalsBeaten: number;
     minerals: number;
     windSeen: number;
+    /** Riesen-Schleimpilz besiegt (Anzahl) */
+    bossBeaten: number;
+    /** Planet umspannt (Anzahl Finale) */
+    planets: number;
+    /** höchste je erreichte Zone (schaltet den Ast „Weltenpilz“ frei) */
+    maxZone: number;
   };
 }
 
@@ -86,7 +96,16 @@ export interface GameState {
   levels: Record<UpgradeId, number>;
   growth: Growth | null;
   /** Werte des aktuellen Durchlaufs */
-  stats: { totalN: number; taps: number; playSeconds: number; zoneDoneAt: number | null; zone2DoneAt: number | null; zone3DoneAt: number | null };
+  stats: {
+    totalN: number;
+    taps: number;
+    playSeconds: number;
+    zoneDoneAt: number | null;
+    zone2DoneAt: number | null;
+    zone3DoneAt: number | null;
+    /** Planet umspannt (150 Knoten + Schleimpilz besiegt) */
+    zone4DoneAt: number | null;
+  };
   meta: Meta;
   events: EventsState;
   zone: Zone;
@@ -114,8 +133,9 @@ export function newMeta(): Meta {
     genomeLevels: {},
     daily: newDaily(),
     track: newTrack(),
+    finaleSeen: 0,
     achievements: [],
-    lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0, seasons: 0, rivalsBeaten: 0, minerals: 0, windSeen: 0 },
+    lifetime: { totalN: 0, taps: 0, goldCaught: 0, rainSeen: 0, playSeconds: 0, seasons: 0, rivalsBeaten: 0, minerals: 0, windSeen: 0, bossBeaten: 0, planets: 0, maxZone: 1 },
   };
 }
 
@@ -125,9 +145,9 @@ export function newGame(seed = Math.floor(Math.random() * 2 ** 31), meta: Meta =
     nodes: generateMap(seed),
     edges: [],
     res: { n: 0, sugar: 0, water: 0, minerals: 0 },
-    levels: { hyphen: 0, enzym: 0, frucht: 0, rhizo: 0, kristall: 0, fern: 0 },
+    levels: { hyphen: 0, enzym: 0, frucht: 0, rhizo: 0, kristall: 0, fern: 0, tiefsee: 0, planet: 0 },
     growth: null,
-    stats: { totalN: 0, taps: 0, playSeconds: 0, zoneDoneAt: null, zone2DoneAt: null, zone3DoneAt: null },
+    stats: { totalN: 0, taps: 0, playSeconds: 0, zoneDoneAt: null, zone2DoneAt: null, zone3DoneAt: null, zone4DoneAt: null },
     meta,
     events: { active: null, golden: null, nextAt: CONFIG.events.firstAt, counter: 0 },
     zone: 1,
@@ -154,7 +174,7 @@ export function eventActive(s: GameState, type: ActiveEvent['type']): boolean {
 }
 
 /** Alle Multiplikatoren an einer Stelle: Genom, Sporen, Erfolge, Ereignisse. */
-export const isTree = (n: MapNode): boolean => n.type === 'baum' || n.type === 'altbaum';
+export const isTree = (n: MapNode): boolean => n.type === 'baum' || n.type === 'altbaum' || n.type === 'urwald';
 
 /** Klima-Faktoren eines Knotens (nur Zone 3, sonst neutral). */
 export function climateOf(node: MapNode): { yield: number; growth: number; water: number; totholz: number; noDrought: boolean } {
@@ -190,16 +210,21 @@ export function mods(s: GameState) {
   const se = season(s);
   const z2 = s.zone >= 2;
   const z3 = s.zone >= 3;
+  const z4 = s.zone >= 4;
   const trees = has(s, 's4') ? s.nodes.reduce((c, n) => c + (n.connected && isTree(n) ? 1 : 0), 0) * lv(s, 's4') : 0;
-  const nodes = has(s, 'w4') ? connectedCount(s) * lv(s, 'w4') : 0;
+  const count = connectedCount(s);
+  const nodes = count * lv(s, 'w4');
   const global =
     (1 + CONFIG.prestige.sporeBonus * s.meta.sporesTotal) *
     (1 + CONFIG.achievementBonus * s.meta.achievements.length) *
     (1 + g.s4PerTree * trees) *
     (1 + CONFIG.effects.kristallGlobal) ** s.levels.kristall *
     (1 + g.w4PerNode * nodes) *
+    (1 + CONFIG.effects.planetGlobal) ** s.levels.planet *
     (se === 'winter' ? sc.winter.global : 1);
   return {
+    /** verbundene Knoten (einmal gezählt, für Kostenberechnungen) */
+    count,
     global,
     tap: mul(s, 'z3', g.z3Tap),
     decomp: (1 + CONFIG.effects.enzymDecomp * s.levels.enzym) * mul(s, 'z1', g.z1Decomp),
@@ -216,17 +241,29 @@ export function mods(s: GameState) {
       (eventActive(s, 'regen') ? CONFIG.events.regen.growth : 1) *
       (z2 ? CONFIG.zone2.speedBonus : 1) *
       (z3 ? CONFIG.zone3.speedBonus : 1) *
+      (z4 ? CONFIG.zone4.speedBonus : 1) *
       (se === 'fruehling' ? sc.fruehling.growth : se === 'winter' ? sc.winter.growth : 1),
     reach:
       CONFIG.growth.reach +
       CONFIG.growth.reachPerRhizo * s.levels.rhizo +
       g.p2Reach * lv(s, 'p2') +
       (z2 ? CONFIG.zone2.reachBonus : 0) +
-      (z3 ? CONFIG.zone3.reachBonus + CONFIG.effects.fernReach * s.levels.fern : 0),
+      (z3 ? CONFIG.zone3.reachBonus + CONFIG.effects.fernReach * s.levels.fern : 0) +
+      (z4 ? CONFIG.zone4.reachBonus : 0),
     // jede Stufe „Langer Schlaf“ verlängert die Offline-Grenze um weitere 12 Stunden
     offlineCap: CONFIG.offlineCapSeconds + (g.s3Offline - CONFIG.offlineCapSeconds) * lv(s, 's3'),
     minerals: mul(s, 'w2', g.w2Min),
     hex: mul(s, 'w3', g.w3Hex),
+    /** Tiefsee-Fäden: Kostenfaktor (ohne Upgrade gar nicht möglich) */
+    ocean:
+      CONFIG.zone4.oceanCost *
+      CONFIG.zone4.oceanCostPerLevel ** Math.max(0, s.levels.tiefsee - 1) *
+      (1 / (1 + (1 / g.o1Ocean - 1) * lv(s, 'o1'))),
+    vulkan: mul(s, 'o2', g.o2Vulkan),
+    /** Urwald-Riesen und Korallenriffe */
+    planetNodes: mul(s, 'o3', g.o3Planet),
+    /** Wartezeit des Schleimpilzes zwischen zwei Schritten */
+    bossSlow: 1 + g.o4Boss * lv(s, 'o4'),
   };
 }
 
@@ -272,19 +309,43 @@ export function nodeYield(s: GameState, node: MapNode, m: Mods = mods(s)): numbe
   if (node.type === 'totholz') return node.stock > 0 ? totholzRate(s, node, m) * m.stock * m.global : 0;
   if (node.type === 'rivale') return CONFIG.rivals.coreNps * distanceBonus(node) * m.global * c;
   if (node.type === 'moor') return CONFIG.zone3Nodes.moor.nps * distanceBonus(node) * m.decomp * m.global * c;
+  if (node.type === 'koralle') return CONFIG.zone4Nodes.koralle.nps * distanceBonus(node) * m.planetNodes * m.global;
   return 0;
 }
 
 /** Wasser eines Knotens pro Sekunde (Feuchtstelle, Moor). */
 export function nodeWater(node: MapNode, m: Mods, droughtFactor = 1): number {
   const c = climateOf(node);
-  const base = node.type === 'feucht' ? CONFIG.nodes.feucht.water : node.type === 'moor' ? CONFIG.zone3Nodes.moor.water : 0;
+  const base =
+    node.type === 'feucht'
+      ? CONFIG.nodes.feucht.water
+      : node.type === 'moor'
+        ? CONFIG.zone3Nodes.moor.water
+        : node.type === 'koralle'
+          ? CONFIG.zone4Nodes.koralle.water
+          : 0;
   return base * distanceBonus(node) * m.water * c.water * (c.noDrought ? 1 : droughtFactor);
 }
 
-/** Mineralien einer Ader pro Sekunde (ohne Entfernungsbonus – sie sollen knapp bleiben). */
-export function nodeMinerals(node: MapNode, m: Mods): number {
-  return node.type === 'mineral' ? CONFIG.zone3Nodes.mineral.min * m.minerals * climateOf(node).yield : 0;
+/** Mineralien einer Ader pro Sekunde (ohne Entfernungsbonus – sie sollen knapp bleiben). Vulkane: nur gekühlt (supply = Wasseranteil). */
+export function nodeMinerals(node: MapNode, m: Mods, supply = 1): number {
+  if (node.type === 'mineral') return CONFIG.zone3Nodes.mineral.min * m.minerals * climateOf(node).yield;
+  if (node.type === 'vulkan') return CONFIG.zone4Nodes.vulkan.min * m.minerals * m.vulkan * supply;
+  return 0;
+}
+
+/** Wasserbedarf eines Knotens (Bäume trinken, Vulkane brauchen Kühlung). */
+export function waterUseOf(node: MapNode): number {
+  if (node.type === 'baum' || node.type === 'altbaum' || node.type === 'urwald') return CONFIG.nodes[node.type].waterUse;
+  if (node.type === 'vulkan') return CONFIG.zone4Nodes.vulkan.waterUse;
+  return 0;
+}
+
+/** Zucker eines Baums pro Sekunde bei vollem Wasser. */
+export function treeSugar(node: MapNode, m: Mods): number {
+  if (!isTree(node)) return 0;
+  const t = node.type as 'baum' | 'altbaum' | 'urwald';
+  return CONFIG.nodes[t].sugar * distanceBonus(node) * m.sugar * climateOf(node).yield * (t === 'urwald' ? m.planetNodes : 1);
 }
 
 export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mods(s)): Rates {
@@ -301,6 +362,10 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
       case 'rivale':
         n += nodeYield(s, node, m);
         break;
+      case 'koralle':
+        n += nodeYield(s, node, m);
+        waterIn += nodeWater(node, m, drought);
+        break;
       case 'moor':
         n += nodeYield(s, node, m);
         waterIn += nodeWater(node, m, drought);
@@ -316,7 +381,9 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
         break;
       case 'baum':
       case 'altbaum':
-        treeDemand += CONFIG.nodes[node.type].waterUse;
+      case 'urwald':
+      case 'vulkan':
+        treeDemand += waterUseOf(node);
         break;
       default:
         break;
@@ -325,8 +392,9 @@ export function computeRates(s: GameState, dt = 1, offline = false, m: Mods = mo
   const available = s.res.water / dt + waterIn;
   const treeSupply = treeDemand === 0 ? 0 : Math.min(1, available / treeDemand);
   for (const node of s.nodes) {
-    if (node.connected && isTree(node))
-      sugar += CONFIG.nodes[node.type as 'baum' | 'altbaum'].sugar * distanceBonus(node) * treeSupply * m.sugar * climateOf(node).yield;
+    if (!node.connected) continue;
+    if (isTree(node)) sugar += treeSugar(node, m) * treeSupply;
+    else if (node.type === 'vulkan') minerals += nodeMinerals(node, m, treeSupply);
   }
   n += CONFIG.effects.fruchtNps * s.levels.frucht * m.global;
   return { n, sugar, waterIn, waterUse: treeDemand * treeSupply, treeSupply, minerals };
@@ -347,7 +415,7 @@ export function tick(s: GameState, dt: number, offline = false): void {
   s.res.minerals += rates.minerals * dt;
   s.meta.lifetime.minerals += rates.minerals * dt;
   s.res.water = Math.min(m.waterCap, Math.max(0, s.res.water + (rates.waterIn - rates.waterUse) * dt));
-  advanceGrowth(s, CONFIG.growth.speed * m.growthSpeed * growthClimate(s) * dt);
+  advanceGrowth(s, CONFIG.growth.speed * m.growthSpeed * growthClimate(s) * oceanSpeed(s) * dt);
   s.stats.playSeconds += dt;
   s.meta.lifetime.playSeconds += dt;
   updateEvents(s, offline);
@@ -361,6 +429,9 @@ function addNutrients(s: GameState, amount: number): void {
   s.stats.totalN += amount;
   s.meta.lifetime.totalN += amount;
 }
+
+/** Tiefsee-Fäden wachsen langsamer. */
+const oceanSpeed = (s: GameState): number => (s.growth?.ocean ? CONFIG.zone4.oceanSpeed : 1);
 
 /** Fäden in die Tropen wachsen schneller, in die Taiga langsamer. */
 function growthClimate(s: GameState): number {
@@ -399,7 +470,28 @@ function advanceGrowth(s: GameState, units: number): void {
       for (const r of s.rivals) if (s.nodes[r.core]?.zone === 3) r.nextAt = s.stats.playSeconds + CONFIG.rivals.interval * 2;
     }
     if (s.stats.zone3DoneAt === null && c >= CONFIG.zone3.goal) s.stats.zone3DoneAt = s.stats.playSeconds;
+    if (s.zone === 3 && c >= CONFIG.zone4.unlockAt) {
+      s.zone = 4;
+      s.meta.track.run.zone4At = s.stats.playSeconds;
+      for (const r of s.rivals) if (s.nodes[r.core]?.zone === 4) r.nextAt = s.stats.playSeconds + CONFIG.zone4.boss.interval * 2;
+    }
+    s.meta.lifetime.maxZone = Math.max(s.meta.lifetime.maxZone, s.zone);
+    checkPlanetDone(s);
   }
+}
+
+/** Der Riesen-Schleimpilz (Rivale in Zone 4) – oder undefined, wenn die Karte keinen hat. */
+export function boss(s: GameState): Rival | undefined {
+  return s.rivals.find((r) => s.nodes[r.core]?.zone === 4);
+}
+
+/** Finale: 150 Knoten und der Schleimpilz ist besiegt. */
+export function checkPlanetDone(s: GameState): boolean {
+  if (s.zone < 4 || s.stats.zone4DoneAt !== null) return false;
+  if (connectedCount(s) < CONFIG.zone4.goal || boss(s)?.alive) return false;
+  s.stats.zone4DoneAt = s.stats.playSeconds;
+  s.meta.lifetime.planets++;
+  return true;
 }
 
 // ---------- Konkurrenzpilze ----------
@@ -409,7 +501,8 @@ function initRivals(s: GameState): void {
   for (const n of s.nodes) {
     if (n.type !== 'rivale') continue;
     n.owner = s.rivals.length + 1;
-    s.rivals.push({ core: n.id, edges: [], nextAt: 0, alive: true, reach: n.zone === 3 ? CONFIG.zone3.rivalReach : CONFIG.rivals.reach });
+    const reach = n.zone === 4 ? CONFIG.zone4.boss.reach : n.zone === 3 ? CONFIG.zone3.rivalReach : CONFIG.rivals.reach;
+    s.rivals.push({ core: n.id, edges: [], nextAt: 0, alive: true, reach });
   }
 }
 
@@ -444,9 +537,11 @@ function defeatRival(s: GameState, index: number): void {
   r.alive = false;
   r.edges = [];
   for (const n of s.nodes) if (n.owner === index + 1) n.owner = 0;
-  const reward = computeRates(s).n * CONFIG.rivals.defeatRewardSeconds;
+  const isBoss = s.nodes[r.core]?.zone === 4;
+  const reward = computeRates(s).n * (isBoss ? CONFIG.zone4.boss.rewardSeconds : CONFIG.rivals.defeatRewardSeconds);
   addNutrients(s, Math.max(reward, 100));
   s.meta.lifetime.rivalsBeaten++;
+  if (isBoss) s.meta.lifetime.bossBeaten++;
 }
 
 /** Ein Rivale besetzt den nächstgelegenen freien Knoten in Reichweite seines Netzes. */
@@ -456,6 +551,8 @@ export function rivalStep(s: GameState, index: number): MapNode | null {
   const owned = s.nodes.filter((n) => n.owner === index + 1);
   // jeder Rivale bleibt in seiner eigenen Zone
   const zone = s.nodes[r.core]?.zone ?? 2;
+  // der Schleimpilz kann nicht schwimmen – er bleibt auf seinem Kontinent
+  const geo = zone === 4 ? planetGeography(s.seed) : null;
   let best: MapNode | null = null;
   let bestFrom: MapNode | null = null;
   let bestD = Infinity;
@@ -464,7 +561,7 @@ export function rivalStep(s: GameState, index: number): MapNode | null {
     if (s.growth?.to === n.id) continue;
     for (const o of owned) {
       const d = Math.hypot(o.x - n.x, o.y - n.y);
-      if (d <= r.reach && d < bestD && pathClear(s, o, n)) {
+      if (d <= r.reach && d < bestD && pathClear(s, o, n) && !(geo && segmentCrossesOcean(geo, o.x, o.y, n.x, n.y))) {
         best = n;
         bestFrom = o;
         bestD = d;
@@ -483,11 +580,13 @@ function updateRivals(s: GameState, offline: boolean): void {
   s.rivals.forEach((r, i) => {
     const zone = s.nodes[r.core]?.zone ?? 2;
     if (!r.alive || zone > s.zone || now < r.nextAt) return;
-    r.nextAt = now + (offline ? CONFIG.rivals.offlineInterval : CONFIG.rivals.interval);
-    const max = zone === 3 ? CONFIG.zone3.rivalMaxReach : CONFIG.rivals.maxReach;
+    const b = CONFIG.zone4.boss;
+    if (zone === 4) r.nextAt = now + (offline ? b.offlineInterval : b.interval) * mods(s).bossSlow;
+    else r.nextAt = now + (offline ? CONFIG.rivals.offlineInterval : CONFIG.rivals.interval);
+    const max = zone === 4 ? b.maxReach : zone === 3 ? CONFIG.zone3.rivalMaxReach : CONFIG.rivals.maxReach;
     if (!rivalStep(s, i) && r.reach < max) {
       // nichts in Reichweite: weiter ausgreifen und bald erneut versuchen
-      r.reach = Math.min(max, r.reach + CONFIG.rivals.reachStep * (zone === 3 ? 2.5 : 1));
+      r.reach = Math.min(max, r.reach + (zone === 4 ? b.reachStep : CONFIG.rivals.reachStep * (zone === 3 ? 2.5 : 1)));
       r.nextAt = now + 15;
     }
   });
@@ -578,49 +677,75 @@ export function pathClear(s: GameState, a: MapNode, b: MapNode): boolean {
   return true;
 }
 
-export function findSource(s: GameState, targetId: number): MapNode | null {
+/**
+ * Bester Ausgangsknoten für einen Faden: der nächste verbundene Knoten in Reichweite.
+ * Ein Weg über Land wird einem Tiefsee-Faden immer vorgezogen; über Wasser geht es nur mit „Tiefsee-Hyphen“.
+ */
+export function findSourceInfo(s: GameState, targetId: number): { node: MapNode; ocean: boolean } | null {
   const target = s.nodes[targetId];
   if (!target || target.connected || target.type === 'stein' || target.zone > s.zone) return null;
   if (target.type === 'rivale' && !s.rivals[target.owner - 1]?.alive) return null;
   const maxReach = reach(s);
-  let best: MapNode | null = null;
-  let bestD = Infinity;
+  const coast = CONFIG.zone4.coast;
+  const geo = s.zone >= 4 ? planetGeography(s.seed) : null;
+  const canSwim = s.levels.tiefsee > 0;
+  let land: MapNode | null = null;
+  let landD = Infinity;
+  let sea: MapNode | null = null;
+  let seaD = Infinity;
   for (const node of s.nodes) {
     if (!node.connected) continue;
     const d = Math.hypot(node.x - target.x, node.y - target.y);
-    if (d <= maxReach && d < bestD && pathClear(s, node, target)) {
-      best = node;
-      bestD = d;
+    if (d > maxReach || d >= landD) continue;
+    const ocean = !!geo && (target.dist > coast || node.dist > coast) && segmentCrossesOcean(geo, node.x, node.y, target.x, target.y);
+    // gibt es schon einen Landweg, ist jeder Seeweg unnötig
+    if (ocean && (land || !canSwim || d >= seaD)) continue;
+    if (!pathClear(s, node, target)) continue;
+    if (ocean) {
+      sea = node;
+      seaD = d;
+    } else {
+      land = node;
+      landD = d;
     }
   }
-  return best;
+  if (land) return { node: land, ocean: false };
+  return sea ? { node: sea, ocean: true } : null;
+}
+
+export function findSource(s: GameState, targetId: number): MapNode | null {
+  return findSourceInfo(s, targetId)?.node ?? null;
 }
 
 /** Kosten eines Fadens; besetzte Knoten und Rivalen-Kerne kosten ein Vielfaches. */
-export function growthCost(s: GameState, length: number, target?: MapNode): number {
+export function growthCost(s: GameState, length: number, target?: MapNode, ocean = false, m: Mods = mods(s)): number {
   const g = CONFIG.growth;
-  const n = connectedCount(s);
+  const n = m.count;
   const u = CONFIG.zone2.unlockAt;
   const u3 = CONFIG.zone3.unlockAt;
+  const u4 = CONFIG.zone4.unlockAt;
   // Kostenanstieg wird mit jeder Zone flacher – sonst wären die großen Zonen unbezahlbar
   const scale =
     g.costPerNode ** Math.min(n, u) *
     CONFIG.zone2.costPerNode ** Math.max(0, Math.min(n, u3) - u) *
-    CONFIG.zone3.costPerNode ** Math.max(0, n - u3);
-  const extra = !target ? 1 : target.type === 'rivale' ? CONFIG.rivals.coreCost : target.owner > 0 ? CONFIG.rivals.reclaimCost : 1;
+    CONFIG.zone3.costPerNode ** Math.max(0, Math.min(n, u4) - u3) *
+    CONFIG.zone4.costPerNode ** Math.max(0, n - u4);
+  const core = target?.zone === 4 ? CONFIG.zone4.boss.coreCost : CONFIG.rivals.coreCost;
+  const extra = !target ? 1 : target.type === 'rivale' ? core : target.owner > 0 ? CONFIG.rivals.reclaimCost : 1;
   // Sporenwind trägt die Fäden – sie kosten nur einen Bruchteil
   const wind = eventActive(s, 'wind') ? CONFIG.events.wind.cost : 1;
-  return g.costPerUnit * length * scale * mods(s).growthCost * extra * wind;
+  return g.costPerUnit * length * scale * m.growthCost * extra * wind * (ocean ? m.ocean : 1);
 }
 
 export type GrowResult = { ok: true } | { ok: false; reason: 'busy' | 'unreachable' | 'cost' };
 
-export function growthQuote(s: GameState, targetId: number): { source: MapNode; length: number; cost: number } | null {
+export function growthQuote(s: GameState, targetId: number): { source: MapNode; length: number; cost: number; ocean: boolean } | null {
   const target = s.nodes[targetId];
-  const source = findSource(s, targetId);
-  if (!target || !source) return null;
+  const info = findSourceInfo(s, targetId);
+  if (!target || !info) return null;
+  const source = info.node;
   const length = Math.hypot(source.x - target.x, source.y - target.y);
-  return { source, length, cost: growthCost(s, length, target) };
+  return { source, length, cost: growthCost(s, length, target, info.ocean), ocean: info.ocean };
 }
 
 export function startGrowth(s: GameState, targetId: number): GrowResult {
@@ -629,7 +754,7 @@ export function startGrowth(s: GameState, targetId: number): GrowResult {
   if (!q) return { ok: false, reason: 'unreachable' };
   if (s.res.n < q.cost) return { ok: false, reason: 'cost' };
   s.res.n -= q.cost;
-  s.growth = { from: q.source.id, to: targetId, length: q.length, progress: 0 };
+  s.growth = { from: q.source.id, to: targetId, length: q.length, progress: 0, ...(q.ocean ? { ocean: true } : {}) };
   return { ok: true };
 }
 
@@ -647,6 +772,7 @@ export function upgradeCost(s: GameState, id: UpgradeId): Cost {
 
 export function upgradeUnlocked(s: GameState, id: UpgradeId): boolean {
   const u = upgradeDef(id).unlock;
+  if (u === 'zone4') return s.zone >= 4;
   return u === 'none' || (u === 'sugar' ? sugarUnlocked(s) : mineralsUnlocked(s));
 }
 
@@ -682,8 +808,9 @@ export function sporeGainRaw(s: GameState): number {
 
 /** Dämpfung: bis zur Grenze unverändert, darüber wächst der Ertrag deutlich langsamer. */
 export function dampSpores(raw: number): number {
-  const { softCap: cap, softCapExp: e } = CONFIG.prestige;
-  return raw <= cap ? raw : cap * (raw / cap) ** e;
+  const { softCap: cap, softCapExp: e, softCap2: cap2 } = CONFIG.prestige;
+  const d = raw <= cap ? raw : cap * (raw / cap) ** e;
+  return d <= cap2 ? d : cap2 * (d / cap2) ** e;
 }
 
 export function sporeGain(s: GameState): number {
@@ -714,6 +841,8 @@ export function runRecord(s: GameState, now: number, spores: number): RunRecord 
     zone2DoneAt: s.stats.zone2DoneAt === null ? null : Math.round(s.stats.zone2DoneAt),
     zone3At: r.zone3At === null ? null : Math.round(r.zone3At),
     zone3DoneAt: s.stats.zone3DoneAt === null ? null : Math.round(s.stats.zone3DoneAt),
+    zone4At: r.zone4At === null ? null : Math.round(r.zone4At),
+    zone4DoneAt: s.stats.zone4DoneAt === null ? null : Math.round(s.stats.zone4DoneAt),
   };
 }
 
@@ -752,6 +881,8 @@ export function genomeAvailable(s: GameState, id: GenomeId): boolean {
   if (lv(s, id) >= CONFIG.genomeMaxLevel) return false;
   if (has(s, id)) return true;
   const d = genomeDef(id);
+  // Weltenpilz erst, wenn man den Planeten einmal erreicht hat
+  if (d.branch === 'weltenpilz' && s.meta.lifetime.maxZone < 4) return false;
   if (d.tier === 1) return true;
   const prev = CONFIG.genome.find((g) => g.branch === d.branch && g.tier === d.tier - 1);
   return !!prev && has(s, prev.id);
