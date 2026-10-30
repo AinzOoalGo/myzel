@@ -23,24 +23,24 @@
       #app { display: flex; flex-direction: column; height: 100%; max-width: 720px; margin: 0 auto; }
       [hidden] { display: none !important; }
 
-      header { display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
-        border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-      #title { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; color: var(--accent); margin-right: 4px; }
-      .res { display: flex; flex-direction: column; line-height: 1.1; padding: 2px 8px; border-left: 1px solid var(--line); }
-      .res .l { font-size: 11px; color: var(--quiet); }
-      .res .v { font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; }
-      .res .r { font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      /* Kopfzeile: oben die Ressourcen (teilen sich die Breite), darunter der Zonen-Fortschritt als Balken */
+      header { padding: calc(6px + env(safe-area-inset-top)) 8px 6px; border-bottom: 1px solid var(--line); }
+      #res-row { display: flex; align-items: center; gap: 2px; justify-content: space-between; }
+      /* Breite nach Inhalt: kleine Werte (Wasser 100) brauchen wenig Platz, große Zahlen bekommen mehr */
+      .res { flex: 0 0 auto; display: flex; flex-direction: column; line-height: 1.12; padding: 1px 5px;
+        border-left: 1px solid var(--line); }
+      .res:first-child { border-left: 0; padding-left: 2px; }
+      .res .l { font-size: clamp(9px, 2.6vw, 11px); color: var(--quiet); white-space: nowrap; }
+      .res .v { font-weight: 700; font-size: clamp(11.5px, 3.45vw, 17px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .res .r { font-size: clamp(9px, 2.6vw, 11px); color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
       .res .r.neg { color: var(--warn); }
-      #net { margin-left: auto; font-size: 12px; color: var(--quiet); }
-      @media (max-width: 480px) {
-        header { flex-wrap: nowrap; gap: 4px; padding-left: 8px; padding-right: 8px; }
-        #title { display: none; }
-        .res { padding: 2px 6px; }
-        .res:first-of-type { border-left: 0; }
-        .res .v { font-size: 15px; }
-        #net { font-size: 11px; text-align: right; }
-      }
-      #speed-badge { background: #6b2a2a; color: #ffd9d0; font-size: 11px; font-weight: 700; border-radius: 6px; padding: 3px 6px; }
+      #btn-settings { flex: none; background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 10px;
+        width: 36px; height: 36px; font-size: 17px; cursor: pointer; margin-left: auto; }
+      #progress-row { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+      #net { font-size: 11px; color: var(--quiet); white-space: nowrap; font-variant-numeric: tabular-nums; }
+      #net-bar { flex: 1; height: 4px; background: #2b251d; border-radius: 2px; overflow: hidden; }
+      #net-bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width .4s ease; }
+      #speed-badge { background: #6b2a2a; color: #ffd9d0; font-size: 10.5px; font-weight: 700; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
       .speed-row { display: flex; gap: 6px; }
       .slider { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
       .slider span { width: 70px; }
@@ -50,37 +50,16 @@
       @media (prefers-reduced-motion: reduce) { .up.pulse { animation: none; } }
       .box .speed-row button { margin-top: 0; background: #2b251d; color: var(--ink); border: 1px solid var(--line); }
       .box .speed-row button.on { background: var(--accent); color: var(--accent-ink); }
-      .res .v { white-space: nowrap; }
       @media (max-width: 360px) {
-        .res { padding: 2px 4px; }
-        .res .l { font-size: 10px; }
-        .res .v { font-size: 13px; }
-        #net { font-size: 10px; }
-        #btn-settings { width: 34px; height: 34px; font-size: 16px; }
+        .res { padding: 1px 3px; }
+        #res-row { gap: 0; }
+        #btn-settings { width: 32px; height: 32px; font-size: 15px; }
         #card .grow { padding: 6px 12px; font-size: 13px; }
         #card .grow .lbl { display: none; }
         #tabs .count { display: none; }
-        /* sehr schmal: Sporen nur im Genom-Tab, damit die Kopfzeile nicht überläuft */
-        #res-spores { display: none !important; }
-        header { gap: 2px; padding-left: 6px; padding-right: 6px; }
-        .res { padding: 2px 3px; border-left: 0; }
-        .res .l { font-size: 9.5px; }
-        .res .v { font-size: 12.5px; }
-        .res .r { font-size: 10px; }
-        #net { font-size: 9.5px; }
-        #btn-settings { width: 30px; height: 30px; font-size: 14px; flex: none; }
-        #speed-badge { font-size: 9.5px; padding: 2px 4px; }
-      }
-      @media (max-width: 340px) {
-        /* winzige Handys: lieber eine zweite Zeile als abgeschnittene Knöpfe */
-        header { flex-wrap: wrap; row-gap: 2px; }
-        #net { order: 10; flex-basis: 100%; text-align: left; margin-left: 4px; }
-        #btn-settings { margin-left: auto; }
         #tabs button { font-size: 12px; }
         .buy { min-width: 84px; }
       }
-      #btn-settings { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 10px;
-        width: 38px; height: 38px; font-size: 18px; cursor: pointer; }
 
       main { position: relative; flex: 1; min-height: 200px; }
       canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -193,15 +172,19 @@
   <body>
     <div id="app">
       <header>
-        <span id="title"></span>
-        <div class="res" id="res-n"><span class="l"></span><span class="v">0</span><span class="r"></span></div>
-        <div class="res" id="res-sugar" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
-        <div class="res" id="res-water" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
-        <div class="res" id="res-spores" hidden><span class="l"></span><span class="v">0</span></div>
-        <div class="res" id="res-min" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
-        <span id="net"></span>
-        <span id="speed-badge" hidden></span>
-        <button id="btn-settings" aria-label="Einstellungen">⚙</button>
+        <div id="res-row">
+          <div class="res" id="res-n"><span class="l"></span><span class="v">0</span><span class="r"></span></div>
+          <div class="res" id="res-sugar" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
+          <div class="res" id="res-water" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
+          <div class="res" id="res-min" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
+          <div class="res" id="res-spores" hidden><span class="l"></span><span class="v">0</span><span class="r"></span></div>
+          <button id="btn-settings" aria-label="Einstellungen">⚙</button>
+        </div>
+        <div id="progress-row">
+          <span id="net"></span>
+          <div id="net-bar" role="progressbar" aria-label="Fortschritt der Zone"><i></i></div>
+          <span id="speed-badge" hidden></span>
+        </div>
       </header>
       <main>
         <canvas id="cv" tabindex="0" role="application"></canvas>

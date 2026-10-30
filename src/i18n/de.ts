@@ -1,16 +1,16 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Version 1.2.1',
+  version: 'Version 1.2.2',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
   res_water: 'Wasser',
   per_sec: '{v}/s',
   water_full: 'voll',
-  net_progress: 'Netz {c}/{goal}',
+  net_progress: 'Waldboden {c}/{goal}',
   net_progress_z2: 'Wald {c}/{goal}',
-  net_progress_z3: 'Land {c}/{goal}',
+  net_progress_z3: 'Kontinent {c}/{goal}',
   zone3_title: 'Zone 3: Der Kontinent',
   zone3_body:
     'Dein Netz reicht über den ganzen Wald hinaus. Vor dir liegt ein Kontinent mit drei Klimazonen: Tropen, Steppe und Taiga. Neu: Moore voller Wasser, Mineraladern für die neuen Upgrades, seltene Hexenringe für mehr Sporen – und der Sporenwind, der deine Fäden fast umsonst trägt. Zwei neue, stärkere Konkurrenzpilze warten schon.',
@@ -110,7 +110,7 @@ export const de = {
   q_prestige: 'Starte {n} Sporenflug',
   q_genome: 'Kaufe {n} Mutation oder Stufe',
   res_spores: 'Sporen',
-  res_min: 'Mineral.',
+  res_min: 'Mineralien',
 
   prestige_title: 'Sporenflug',
   prestige_desc:

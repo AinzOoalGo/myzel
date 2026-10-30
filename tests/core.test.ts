@@ -235,3 +235,13 @@ describe('Zahlenformat', () => {
     expect(formatDuration(7500)).toBe('2 Std. 5 Min.');
   });
 });
+
+describe('Kurzformat Kopfzeile', () => {
+  it('höchstens 3 gültige Ziffern', async () => {
+    const { formatShort } = await import('../src/core/format');
+    expect(formatShort(950)).toBe('950');
+    expect(formatShort(5_413_000)).toBe('5,41 Mio.');
+    expect(formatShort(54_130_000)).toBe('54,1 Mio.');
+    expect(formatShort(541_530_000_000)).toBe('541 Mrd.');
+  });
+});

@@ -25,3 +25,17 @@ export function formatDuration(seconds: number): string {
   const rm = m % 60;
   return rm ? `${h} Std. ${rm} Min.` : `${h} Std.`;
 }
+
+/** Kurzform für die enge Kopfzeile: höchstens 3 gültige Ziffern (5,41 Mio. · 54,1 Mio. · 541 Mio.) */
+export function formatShort(v: number): string {
+  if (!Number.isFinite(v)) return '∞';
+  const a = Math.abs(v);
+  if (a < 1000) return formatNumber(v);
+  const sign = v < 0 ? '-' : '';
+  const tier = Math.min(UNITS.length - 1, Math.floor(Math.log10(a) / 3));
+  const scaled = a / 10 ** (tier * 3);
+  const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+  const f = 10 ** digits;
+  const str = new Intl.NumberFormat('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.floor(scaled * f) / f);
+  return `${sign}${str} ${UNITS[tier]}`;
+}

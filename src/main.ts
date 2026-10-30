@@ -34,7 +34,7 @@ import {
   upgradeCost,
   type GameState,
 } from './core/game';
-import { formatDuration, formatNumber } from './core/format';
+import { formatDuration, formatNumber, formatShort } from './core/format';
 import { applyOffline, deserialize, exportString, importString, serialize } from './core/save';
 import { trackActive, trackOffline, trackSession } from './core/tracking';
 import { statsSummary, statsText } from './ui/stats';
@@ -277,26 +277,29 @@ function hint(): string {
 
 function updateUi(force = false): void {
   const rates = computeRates(state);
-  $('#res-n .v').textContent = fmt(state.res.n);
-  $('#res-n .r').textContent = t('per_sec', { v: fmt(rates.n) });
+  $('#res-n .v').textContent = formatShort(state.res.n);
+  $('#res-n .r').textContent = t('per_sec', { v: formatShort(rates.n) });
   const sugarOn = sugarUnlocked(state);
   $('#res-sugar').hidden = !sugarOn;
-  $('#res-sugar .v').textContent = fmt(state.res.sugar);
+  $('#res-sugar .v').textContent = formatShort(state.res.sugar);
   const waterOn = state.nodes.some((n) => n.connected && (n.type === 'feucht' || n.type === 'moor'));
   const minOn = mineralsUnlocked(state);
   $('#res-min').hidden = !minOn;
-  $('#res-min .v').textContent = fmt(state.res.minerals);
+  $('#res-min .v').textContent = formatShort(state.res.minerals);
   $('#res-min .r').textContent = t('per_sec', { v: fmt(rates.minerals) });
   $('#res-water').hidden = !waterOn;
-  $('#res-water .v').textContent = fmt(state.res.water);
+  $('#res-water .v').textContent = formatShort(state.res.water);
   // Raten pro Sekunde wie bei den Nährstoffen; Wasser netto (Zufluss minus Verbrauch der Bäume)
-  $('#res-sugar .r').textContent = t('per_sec', { v: fmt(rates.sugar) });
+  $('#res-sugar .r').textContent = t('per_sec', { v: formatShort(rates.sugar) });
   const water = rates.waterIn - rates.waterUse;
   const full = water > 0 && state.res.water >= mods(state).waterCap - 1e-6;
   const wEl = $('#res-water .r');
   wEl.textContent = full ? t('water_full') : t('per_sec', { v: `${water > 0 ? '+' : ''}${fmt(water)}` });
   wEl.classList.toggle('neg', water < 0);
   const c = connectedCount(state);
+  // Balken: Fortschritt innerhalb der aktuellen Zone (von ihrer Öffnung bis zu ihrem Ziel)
+  const [from, goal] = state.zone >= 3 ? [CONFIG.zone3.unlockAt, CONFIG.zone3.goal] : state.zone >= 2 ? [CONFIG.zone2.unlockAt, CONFIG.zone2.goal] : [0, CONFIG.zoneGoal];
+  $('#net-bar i').style.width = `${Math.max(0, Math.min(100, ((c - from) / (goal - from)) * 100))}%`;
   $('#net').textContent =
     state.zone >= 3
       ? t('net_progress_z3', { c, goal: CONFIG.zone3.goal })
@@ -314,7 +317,8 @@ function updateUi(force = false): void {
   $('#season').hidden = !se;
   if (se) $('#season').textContent = `${t(`season_${se}` as TextKey)} · ${formatDuration(Math.ceil(seasonLeft(state)))}`;
   $('#res-spores').hidden = state.meta.sporesTotal === 0;
-  $('#res-spores .v').textContent = fmt(state.meta.spores);
+  $('#res-spores .v').textContent = formatShort(state.meta.spores);
+  $('#res-spores .r').textContent = `+${formatShort(CONFIG.prestige.sporeBonus * state.meta.sporesTotal * 100)} %`;
   updateTabs();
   if (activeTab === 'genome') updatePrestigeBox();
   for (const id of checkAchievements(state)) {
@@ -1033,7 +1037,6 @@ window.addEventListener('pagehide', save);
 // Größe neu messen, wenn sich die Fläche ändert (Fenster, Infokarte ein/aus, Drehen)
 new ResizeObserver(() => renderer.resize()).observe(canvas);
 
-$('#title').textContent = t('title');
 canvas.setAttribute('aria-label', t('canvas_label'));
 $('#res-n .l').textContent = t('res_n');
 $('#btn-center').textContent = `⌖ ${t('center')}`;
