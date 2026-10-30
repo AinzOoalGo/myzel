@@ -55,6 +55,7 @@ Stand: 29.10.2026 · Version 1.2.1 · Repository: https://github.com/AinzOoalGo/
 | Gegner | Greifen **nicht** an. Chef findet sie aktuell **evtl. zu schnell** – **noch nicht ändern**, erst Daten aus normalem Spielen (×1) abwarten |
 | Reihenfolge | Tagesaufgaben + Genom-Stufen (erledigt) → **als Nächstes Zone 4 „Planet“** |
 | Battle-Modus | Idee des Chefs (PvP, 4 Spieler, Letzter gewinnt). **Erst wenn der Chef es sagt.** Empfohlen: zuerst Arena gegen 3 Computer-Pilze (ohne Server), dann online |
+| Sporen-Schneeball | Chef überließ die Entscheidung dem Projektleiter (30.10.): Dämpfung ab 150 Sporen pro Flug eingebaut (1.2.3), Sporenbonus +2 % unverändert. Weiter beobachten mit Statistik vom „Normal“-Handy |
 
 ## 6. Was als Nächstes kommt
 

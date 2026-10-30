@@ -210,6 +210,10 @@ export const CONFIG = {
     divisor: 2000,
     /** +2 % auf alle Nährstoffe je jemals gewonnener Spore */
     sporeBonus: 0.02,
+    /** Ab so vielen Sporen pro Flug wird der Zuwachs gedämpft (gegen den „Sporen-Schneeball“, seit 1.2.3) */
+    softCap: 150,
+    /** Über der Grenze: Grenze × (roh / Grenze) ^ Exponent – 600 roh → 300, 2400 roh → 600 */
+    softCapExp: 0.5,
   },
 
   genome: [

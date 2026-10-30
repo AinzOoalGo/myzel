@@ -675,8 +675,19 @@ export function hexBonus(s: GameState): number {
   return 1 + rings * CONFIG.zone3Nodes.hexenring.sporeBonus * mods(s).hex;
 }
 
+/** Sporen vor der Dämpfung (Wurzel aus den Nährstoffen dieses Durchlaufs, mal Hexenring-Bonus). */
+export function sporeGainRaw(s: GameState): number {
+  return Math.sqrt(s.stats.totalN / CONFIG.prestige.divisor) * hexBonus(s);
+}
+
+/** Dämpfung: bis zur Grenze unverändert, darüber wächst der Ertrag deutlich langsamer. */
+export function dampSpores(raw: number): number {
+  const { softCap: cap, softCapExp: e } = CONFIG.prestige;
+  return raw <= cap ? raw : cap * (raw / cap) ** e;
+}
+
 export function sporeGain(s: GameState): number {
-  return Math.floor(Math.sqrt(s.stats.totalN / CONFIG.prestige.divisor) * hexBonus(s));
+  return Math.floor(dampSpores(sporeGainRaw(s)));
 }
 
 export function canPrestige(s: GameState): boolean {

@@ -238,3 +238,14 @@ describe('Genom-Stufen', () => {
     expect(lv(deserialize(raw), 'z1')).toBe(1);
   });
 });
+
+describe('Sporen-Dämpfung (1.2.3)', () => {
+  it('bis 150 unverändert, darüber Wurzel-Dämpfung', async () => {
+    const { dampSpores } = await import('../src/core/game');
+    expect(dampSpores(50)).toBe(50);
+    expect(dampSpores(150)).toBe(150);
+    expect(dampSpores(600)).toBeCloseTo(300);
+    expect(dampSpores(2400)).toBeCloseTo(600);
+    expect(dampSpores(151)).toBeGreaterThan(150);
+  });
+});

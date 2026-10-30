@@ -20,6 +20,7 @@ import {
   season,
   seasonLeft,
   sporeGain,
+  sporeGainRaw,
   canBuy,
   buy,
   computeRates,
@@ -469,7 +470,9 @@ function updatePrestigeBox(): void {
   need.textContent =
     c < CONFIG.prestige.minNodes
       ? t('prestige_need', { n: CONFIG.prestige.minNodes, c })
-      : t('prestige_more') + (hex > 1 ? ` ${t('prestige_hex', { v: fmt((hex - 1) * 100) })}` : '');
+      : t('prestige_more') +
+        (hex > 1 ? ` ${t('prestige_hex', { v: fmt((hex - 1) * 100) })}` : '') +
+        (sporeGainRaw(state) > CONFIG.prestige.softCap ? ` ${t('prestige_cap', { n: CONFIG.prestige.softCap })}` : '');
 }
 
 function buildGenome(): void {

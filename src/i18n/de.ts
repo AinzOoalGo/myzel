@@ -1,7 +1,7 @@
 /** Alle sichtbaren Texte. Englisch kommt später als en.ts mit denselben Schlüsseln. */
 export const de = {
   title: 'Myzel',
-  version: 'Version 1.2.2',
+  version: 'Version 1.2.3',
 
   res_n: 'Nährstoffe',
   res_sugar: 'Zucker',
@@ -119,6 +119,7 @@ export const de = {
   prestige_need: 'Möglich ab {n} verbundenen Knoten (jetzt {c}).',
   prestige_more: 'Mehr Nährstoffe in diesem Wald = mehr Sporen.',
   prestige_hex: 'Hexenringe: +{v} %.',
+  prestige_cap: 'Über {n} Sporen pro Flug wächst der Ertrag langsamer.',
   prestige_confirm_title: 'Sporenflug starten?',
   prestige_confirm_body: 'Du bekommst {v} Sporen. Dein Netz, deine Nährstoffe und Upgrades in diesem Wald werden zurückgesetzt.',
   prestige_confirm: 'Sporen freilassen',
